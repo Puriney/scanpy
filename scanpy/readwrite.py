@@ -4,7 +4,11 @@
 import os
 import sys
 import numpy as np
+import pandas as pd
 import time
+import tables
+from pathlib import Path
+import anndata
 from anndata import AnnData, read_loom, \
     read_csv, read_excel, read_text, read_hdf, read_mtx
 from anndata import read as read_h5ad
@@ -12,10 +16,12 @@ from anndata import read as read_h5ad
 from . import settings
 from . import logging as logg
 
-avail_exts = {'anndata', 'csv', 'xlsx',
-              'txt', 'tsv', 'tab', 'data',  # these four are all equivalent
-              'h5', 'h5ad',
-              'soft.gz', 'txt.gz', 'mtx'}
+# .gz and .bz2 suffixes are also allowed for text formats
+text_exts = {'csv',
+             'tsv', 'tab', 'data', 'txt'}  # these four are all equivalent
+avail_exts = {'anndata', 'xlsx',
+              'h5', 'h5ad', 'mtx', 'mtx.gz',
+              'soft.gz', 'loom'} | text_exts
 """Available file formats for reading data. """
 
 
@@ -25,8 +31,8 @@ avail_exts = {'anndata', 'csv', 'xlsx',
 
 
 def read(filename, backed=False, sheet=None, ext=None, delimiter=None,
-         first_column_names=False, backup_url=None, cache=False):
-    """Read file and return :class:`~scanpy.api.AnnData` object.
+         first_column_names=False, backup_url=None, cache=False, **kwargs):
+    """Read file and return :class:`~anndata.AnnData` object.
 
     To speed up reading, consider passing `cache=True`, which creates an hdf5
     cache file.
@@ -39,7 +45,7 @@ def read(filename, backed=False, sheet=None, ext=None, delimiter=None,
         sc.settings.file_format_data`.  This is the same behavior as in
         `sc.read(filename, ...)`.
     backed : {`False`, `True`, 'r', 'r+'}, optional (default: `False`)
-        Load :class:`~scanpy.api.AnnData` in `backed` mode instead of fully
+        Load :class:`~anndata.AnnData` in `backed` mode instead of fully
         loading it into memory (`memory` mode). Only applies to `.h5ad` files.
         `True` and 'r' are equivalent. If you want to modify backed attributes
         of the AnnData object, you need to choose 'r+'.
@@ -63,13 +69,13 @@ def read(filename, backed=False, sheet=None, ext=None, delimiter=None,
 
     Returns
     -------
-    adata : :class:`~scanpy.api.AnnData`
+    adata : :class:`~anndata.AnnData`
     """
     filename = str(filename)  # allow passing pathlib.Path objects
     if is_valid_filename(filename):
         return _read(filename, backed=backed, sheet=sheet, ext=ext,
                      delimiter=delimiter, first_column_names=first_column_names,
-                     backup_url=backup_url, cache=cache)
+                     backup_url=backup_url, cache=cache, **kwargs)
     # generate filename and read to dict
     filekey = filename
     filename = settings.writedir + filekey + '.' + settings.file_format_data
@@ -83,27 +89,47 @@ def read(filename, backed=False, sheet=None, ext=None, delimiter=None,
     return read_h5ad(filename, backed=backed)
 
 
-def read_10x_h5(filename, genome='mm10'):
-    """Read 10X-Genomics-formatted hdf5 file.
+def read_10x_h5(filename, genome='mm10', gex_only=True):
+    """Read 10x-Genomics-formatted hdf5 file.
 
     Parameters
     ----------
-    filename : `str`
+    filename : `str` | :class:`~pathlib.Path`
         Filename.
-    genome : `str`, optional (default: 'mm10')
+    genome : `str`, optional (default: ``'mm10'``)
         Genome group in hdf5 file.
+    gex_only : `bool`, optional (default: `True`)
+        Only keep 'Gene Expression' data and ignore other feature types,
+        e.g. 'Antibody Capture', 'CRISPR Guide Capture', or 'Custom'
 
     Returns
     -------
-    adata : :class:`~scanpy.api.AnnData`
+    adata : :class:`~anndata.AnnData`
         Annotated data matrix, where obsevations/cells are named by their
         barcode and variables/genes by gene name. The data matrix is stored in
         `adata.X`, cell names in `adata.obs_names` and gene names in
-        `adata.var_names`. The gene IDs are stored in `adata.obs['gene_ids']`.
+        `adata.var_names`. The gene IDs are stored in `adata.var['gene_ids']`.
+        The feature types are stored in `adata.var['feature_types']`
     """
     logg.info('reading', filename, r=True, end=' ')
-    import tables
-    with tables.open_file(filename, 'r') as f:
+    with tables.open_file(str(filename), 'r') as f:
+        if '/matrix' in f:
+            adata = _read_v3_10x_h5(filename)
+            if not gex_only:
+                return adata    # ignore the `genome` argument
+            else:
+                adata = adata[:, list(map(lambda x: x == 'Gene Expression', adata.var['feature_types']))]
+                adata = adata[:, list(map(lambda x: x == str(genome), adata.var['genome']))]
+                return adata
+        else:
+            return _read_legacy_10x_h5(filename, genome=genome)
+
+
+def _read_legacy_10x_h5(filename, genome='mm10'):
+    """
+    Read hdf5 file from Cell Ranger v2 or earlier versions.
+    """
+    with tables.open_file(str(filename), 'r') as f:
         try:
             dsets = {}
             for node in f.walk_nodes('/' + genome, 'Array'):
@@ -132,8 +158,117 @@ def read_10x_h5(filename, genome='mm10'):
             raise Exception('File is missing one or more required datasets.')
 
 
+def _read_v3_10x_h5(filename):
+    """
+    Read hdf5 file from Cell Ranger v3 or later versions.
+    """
+    with tables.open_file(str(filename), 'r') as f:
+        try:
+            dsets = {}
+            for node in f.walk_nodes('/matrix', 'Array'):
+                dsets[node.name] = node.read()
+            from scipy.sparse import csr_matrix
+            M, N = dsets['shape']
+            data = dsets['data']
+            if dsets['data'].dtype == np.dtype('int32'):
+                data = dsets['data'].view('float32')
+                data[:] = dsets['data']
+            matrix = csr_matrix((data, dsets['indices'], dsets['indptr']),
+                                shape=(N, M))
+            adata = AnnData(matrix,
+                            {'obs_names': dsets['barcodes'].astype(str)},
+                            {'var_names': dsets['name'].astype(str),
+                             'gene_ids': dsets['id'].astype(str),
+                             'feature_types': dsets['feature_type'].astype(str),
+                             'genome': dsets['genome'].astype(str)})
+            logg.info(t=True)
+            return adata
+        except KeyError:
+            raise Exception('File is missing one or more required datasets.')
+
+
+def read_10x_mtx(path, var_names='gene_symbols', make_unique=True, cache=False, gex_only=True):
+    """Read 10x-Genomics-formatted mtx directory.
+
+    Parameters
+    ----------
+    path : `str`
+        Path to directory for `.mtx` and `.tsv` files,
+        e.g. './filtered_gene_bc_matrices/hg19/'.
+    var_names : {'gene_symbols', 'gene_ids'}, optional (default: 'gene_symbols')
+        The variables index.
+    make_unique : `bool`, optional (default: `True`)
+        Whether to make the variables index unique by appending '-1',
+        '-2' etc. or not.
+    cache : `bool`, optional (default: `False`)
+        If `False`, read from source, if `True`, read from fast 'h5ad' cache.
+    gex_only : `bool`, optional (default: `True`)
+        Only keep 'Gene Expression' data and ignore other feature types,
+        e.g. 'Antibody Capture', 'CRISPR Guide Capture', or 'Custom'
+
+    Returns
+    -------
+    An :class:`~anndata.AnnData`.
+    """
+    path = str(path)
+    if os.path.exists(os.path.join(path, 'genes.tsv')):
+        return _read_legacy_10x_mtx(path, var_names=var_names,
+                                    make_unique=make_unique, cache=cache)
+    else:
+        adata = _read_v3_10x_mtx(path, var_names=var_names,
+                                 make_unique=make_unique, cache=cache)
+        if not gex_only:
+            return adata
+        else:
+            gex_rows = list(map(lambda x: x == 'Gene Expression', adata.var['feature_types']))
+            return adata[:, gex_rows]
+
+
+def _read_legacy_10x_mtx(path, var_names='gene_symbols', make_unique=True, cache=False):
+    """
+    Read mex from output from Cell Ranger v2 or earlier versions
+    """
+    adata = read(os.path.join(path, 'matrix.mtx'), cache=cache).T  # transpose the data
+    genes = pd.read_csv(os.path.join(path, 'genes.tsv'), header=None, sep='\t')
+    if var_names == 'gene_symbols':
+        var_names = genes[1]
+        if make_unique:
+            var_names = anndata.utils.make_index_unique(pd.Index(var_names))
+        adata.var_names = var_names
+        adata.var['gene_ids'] = genes[0].values
+    elif var_names == 'gene_ids':
+        adata.var_names = genes[0]
+        adata.var['gene_symbols'] = genes[1].values
+    else:
+        raise ValueError('`var_names` needs to be \'gene_symbols\' or \'gene_ids\'')
+    adata.obs_names = pd.read_csv(os.path.join(path, 'barcodes.tsv'), header=None)[0]
+    return adata
+
+
+def _read_v3_10x_mtx(path, var_names='gene_symbols', make_unique=True, cache=False):
+    """
+    Read mex from output from Cell Ranger v3 or later versions
+    """
+    adata = read(os.path.join(path, 'matrix.mtx.gz'), cache=cache).T  # transpose the data
+    genes = pd.read_csv(os.path.join(path, 'features.tsv.gz'), header=None, sep='\t')
+    if var_names == 'gene_symbols':
+        var_names = genes[1]
+        if make_unique:
+            var_names = anndata.utils.make_index_unique(pd.Index(var_names))
+        adata.var_names = var_names
+        adata.var['gene_ids'] = genes[0].values
+    elif var_names == 'gene_ids':
+        adata.var_names = genes[0]
+        adata.var['gene_symbols'] = genes[1].values
+    else:
+        raise ValueError('`var_names` needs to be \'gene_symbols\' or \'gene_ids\'')
+    adata.var['feature_types'] = genes[2].values
+    adata.obs_names = pd.read_csv(os.path.join(path, 'barcodes.tsv.gz'), header=None)[0]
+    return adata
+
+
 def write(filename, adata, ext=None, compression='gzip', compression_opts=None):
-    """Write :class:`~scanpy.api.AnnData` objects to file.
+    """Write :class:`~anndata.AnnData` objects to file.
 
     Parameters
     ----------
@@ -142,7 +277,7 @@ def write(filename, adata, ext=None, compression='gzip', compression_opts=None):
         generating a filename via `sc.settings.writedir + filename +
         sc.settings.file_format_data`.  This is the same behavior as in
         :func:`~scanpy.api.read`.
-    adata : :class:`~scanpy.api.AnnData`
+    adata : :class:`~anndata.AnnData`
         Annotated data matrix.
     ext : {`None`, `'h5'`, `'csv'`, `'txt'`, `'npz'`} (default: `None`)
         File extension from wich to infer file format. If `None`, defaults to
@@ -200,8 +335,6 @@ def read_params(filename, asheader=False, verbosity=0):
         Dictionary that stores parameters.
     """
     filename = str(filename)  # allow passing pathlib.Path objects
-    if not asheader:
-        settings.m(verbosity, 'reading params file', filename)
     from collections import OrderedDict
     params = OrderedDict([])
     for line in open(filename):
@@ -260,7 +393,7 @@ def get_params_from_list(params_list):
 
 def _read(filename, backed=False, sheet=None, ext=None, delimiter=None,
           first_column_names=None, backup_url=None, cache=False,
-          suppress_cache_warning=False):
+          suppress_cache_warning=False, **kwargs):
     if ext is not None and ext not in avail_exts:
         raise ValueError('Please provide one of the available extensions.\n'
                          + avail_exts)
@@ -279,6 +412,8 @@ def _read(filename, backed=False, sheet=None, ext=None, delimiter=None,
     # read other file types
     filename_cache = (settings.cachedir + filename.lstrip(
         './').replace('/', '-').replace('.' + ext, '.h5ad'))
+    if filename_cache.endswith('.gz'): filename_cache = filename_cache[:-3]
+    if filename_cache.endswith('.bz2'): filename_cache = filename_cache[:-4]
     if cache and os.path.exists(filename_cache):
         logg.info('... reading from cache file', filename_cache)
         adata = read_h5ad(filename_cache, backed=False)
@@ -296,7 +431,7 @@ def _read(filename, backed=False, sheet=None, ext=None, delimiter=None,
                     'Provide `sheet` parameter when reading \'.xlsx\' files.')
             else:
                 adata = read_excel(filename, sheet)
-        elif ext == 'mtx':
+        elif ext in {'mtx', 'mtx.gz'}:
             adata = read_mtx(filename)
         elif ext == 'csv':
             adata = read_csv(filename, first_column_names=first_column_names)
@@ -308,8 +443,8 @@ def _read(filename, backed=False, sheet=None, ext=None, delimiter=None,
             adata = read_text(filename, delimiter, first_column_names)
         elif ext == 'soft.gz':
             adata = _read_softgz(filename)
-        elif ext == 'txt.gz':
-            sys.exit('TODO: implement similar to read_softgz')
+        elif ext == 'loom':
+            adata = read_loom(filename=filename, **kwargs)
         else:
             raise ValueError('Unkown extension {}.'.format(ext))
         if cache:
@@ -332,19 +467,18 @@ def _read_softgz(filename):
     -------
     adata
 
-    Note
-    ----
+    Notes
+    -----
     The function is based on a script by Kerby Shedden.
     http://dept.stat.lsa.umich.edu/~kshedden/Python-Workshop/gene_expression_comparison.html
     """
     filename = str(filename)  # allow passing pathlib.Path objects
     import gzip
-    with gzip.open(filename) as file:
+    with gzip.open(filename, mode='rt') as file:
         # The header part of the file contains information about the
         # samples. Read that information first.
         samples_info = {}
         for line in file:
-            line = line.decode("utf-8")
             if line.startswith("!dataset_table_begin"):
                 break
             elif line.startswith("!subset_description"):
@@ -355,7 +489,7 @@ def _read_softgz(filename):
                 for k in subset_ids:
                     samples_info[k] = subset_description
         # Next line is the column headers (sample id's)
-        sample_names = file.readline().decode("utf-8").split("\t")
+        sample_names = file.readline().strip().split("\t")
         # The column indices that contain gene expression data
         I = [i for i, x in enumerate(sample_names) if x.startswith("GSM")]
         # Restrict the column headers to those that we keep
@@ -366,7 +500,6 @@ def _read_softgz(filename):
         # identifiers
         gene_names, X = [], []
         for line in file:
-            line = line.decode("utf-8")
             # This is what signals the end of the gene expression data
             # section in the file
             if line.startswith("!dataset_table_end"):
@@ -505,12 +638,22 @@ def check_datafile_present_and_download(filename, backup_url=None):
 
 def is_valid_filename(filename, return_ext=False):
     """Check whether the argument is a filename."""
-    for ext in avail_exts:
-        if filename.endswith('.' + ext):
-            return ext if return_ext else True
-    if return_ext:
-        raise ValueError('"{}" does not end on a valid extension.\n'
-                         'Please, provide one of the available extensions.\n{}'
-                         .format(filename, avail_exts))
+    ext = Path(filename).suffixes
+
+    # cases for gzipped/bzipped text files
+    if len(ext) == 2 and ext[0][1:] in text_exts and ext[1][1:] in ('gz', 'bz2'):
+        return ext[0][1:] if return_ext else True
+    elif ext and ext[-1][1:] in avail_exts:
+        return ext[-1][1:] if return_ext else True
+    elif ''.join(ext) == '.soft.gz':
+        return 'soft.gz' if return_ext else True
+    elif ''.join(ext) == '.mtx.gz':
+        return 'mtx.gz' if return_ext else True
     else:
-        return False
+        if return_ext:
+            raise ValueError('"{}" does not end on a valid extension.\n'
+                             'Please, provide one of the available extensions.\n{}\n'
+                             'Text files with .gz and .bz2 extensions are also supported.'
+                             .format(filename, avail_exts))
+        else:
+            return False

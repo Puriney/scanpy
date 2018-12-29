@@ -21,11 +21,11 @@ def blobs(n_variables=11, n_centers=5, cluster_std=1.0, n_observations=640):
         Standard deviation of clusters.
     n_observations : `int`, optional (default: 640)
         Number of observations. By default, this is the same observation number as in
-        ``sc.examples.krumsiek11()``.
+        ``sc.datasets.krumsiek11()``.
 
     Returns
     -------
-    adata : :class:`~scanpy.api.AnnData`
+    adata : :class:`~anndata.AnnData`
         Annotated data matrix containing a observation annotation 'blobs' that
         indicates cluster identity.
     """
@@ -65,11 +65,13 @@ def krumsiek11():
     simulate the data. It describes development to four cell fates: 'monocyte',
     'erythrocyte', 'megakaryocyte' and 'neutrophil'.
 
+    See also the discussion of this data in [Wolf17i]_.
+
     Simulate via :func:`~scanpy.api.sim`.
 
     Returns
     -------
-    adata : :class:`~scanpy.api.AnnData`
+    adata : :class:`~anndata.AnnData`
         Annotated data matrix.
     """
     filename = os.path.dirname(__file__) + '/krumsiek11.txt'
@@ -78,15 +80,16 @@ def krumsiek11():
     adata = sc.read(filename, first_column_names=True)
     sc.settings.verbosity = verbosity_save
     adata.uns['iroot'] = 0
-    fate_labels = {0: 'progenitor', 159: 'monocyte', 319: 'erythrocyte',
-                   459: 'megakaryocyte', 619: 'neutrophil'}
+    fate_labels = {0: 'Stem', 159: 'Mo', 319: 'Ery',
+                   459: 'Mk', 619: 'Neu'}
     adata.uns['highlights'] = fate_labels
     cell_type = np.array(['progenitor' for i in range(adata.n_obs)])
-    cell_type[80:160] = 'monocyte'
-    cell_type[240:320] = 'erythrocyte'
-    cell_type[400:480] = 'megakaryocyte'
-    cell_type[560:640] = 'neutrophil'
+    cell_type[80:160] = 'Mo'
+    cell_type[240:320] = 'Ery'
+    cell_type[400:480] = 'Mk'
+    cell_type[560:640] = 'Neu'
     adata.obs['cell_type'] = cell_type
+    sc.utils.sanitize_anndata(adata)
     return adata
 
 
@@ -95,7 +98,7 @@ def moignard15():
 
     Returns
     -------
-    adata : :class:`~scanpy.api.AnnData`
+    adata : :class:`~anndata.AnnData`
         Annotated data matrix.
     """
     filename = 'data/moignard15/nbt.3154-S3.xlsx'
@@ -130,7 +133,7 @@ def paul15():
 
     Returns
     -------
-    adata : :class:`~scanpy.api.AnnData`
+    adata : :class:`~anndata.AnnData`
         Annotated data matrix.
     """
     logg.warn('In Scanpy 0.*, this returned logarithmized data. '
@@ -175,16 +178,56 @@ def toggleswitch():
     """Simulated toggleswitch.
 
     Data obtained simulating a simple toggleswitch `Gardner *et al.*, Nature
-    (2000) <https://doi.org/10.1038/35002131>`_.
+    (2000) <https://doi.org/10.1038/35002131>`__.
 
     Simulate via :func:`~scanpy.api.sim`.
 
     Returns
     -------
-    adata : :class:`~scanpy.api.AnnData`
+    adata : :class:`~anndata.AnnData`
         Annotated data matrix.
     """
     filename = os.path.dirname(__file__) + '/toggleswitch.txt'
     adata = sc.read(filename, first_column_names=True)
     adata.uns['iroot'] = 0
+    return adata
+
+
+def pbmc68k_reduced():
+    """Subsampled and processed 68k PBMCs.
+
+    10x PBMC 68k dataset from
+    https://support.10xgenomics.com/single-cell-gene-expression/datasets
+
+    The original PBMC 68k dataset was preprocessed using scanpy and was saved
+    keeping only 724 cells and 221 highly variable genes.
+
+    The saved file contains the annotation of cell types (key: 'bulk_labels'), UMAP coordinates,
+    louvain clustering and gene rankings based on the bulk_labels.
+
+    Returns
+    -------
+    adata : :class:`~anndata.AnnData`
+        Annotated data matrix.
+    """
+
+    filename = os.path.dirname(__file__) + '/10x_pbmc68k_reduced.h5ad'
+    return sc.read(filename)
+
+
+def pbmc3k():
+    """3k PBMCs from 10x Genomics.
+
+    The data consists in 3k PBMCs from a Healthy Donor and is freely available
+    from 10x Genomics (`here
+    <http://cf.10xgenomics.com/samples/cell-exp/1.1.0/pbmc3k/pbmc3k_filtered_gene_bc_matrices.tar.gz>`__
+    from this `webpage
+    <https://support.10xgenomics.com/single-cell-gene-expression/datasets/1.1.0/pbmc3k>`__).
+
+    Returns
+    -------
+    adata : :class:`~anndata.AnnData`
+        Annotated data matrix.
+    """
+    adata = sc.read('./data/pbmc3k_raw.h5ad', backup_url='http://falexwolf.de/data/pbmc3k_raw.h5ad')
     return adata

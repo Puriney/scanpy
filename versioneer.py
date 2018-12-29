@@ -271,14 +271,18 @@ Dedication" license (CC0-1.0), as described in
 https://creativecommons.org/publicdomain/zero/1.0/ .
 
 [pypi-image]: https://img.shields.io/pypi/v/versioneer.svg
-[pypi-url]: https://pypi.python.org/pypi/versioneer/
+[pypi-url]: https://pypi.org/project/versioneer/
 [travis-image]:
 https://img.shields.io/travis/warner/python-versioneer/master.svg
 [travis-url]: https://travis-ci.org/warner/python-versioneer
 
 """
 
-import configparser
+from __future__ import print_function
+try:
+    import configparser
+except ImportError:
+    import ConfigParser as configparser
 import errno
 import json
 import os

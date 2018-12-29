@@ -1,62 +1,94 @@
+from typing import Optional, Tuple, Sequence, Type, Mapping, Any
+
 import numpy as np
 import pandas as pd
+from anndata import AnnData
 from natsort import natsorted
+from scipy.sparse import spmatrix
+
 from .. import utils
 from .. import settings
 from .. import logging as logg
 
+try:
+    from louvain.VertexPartition import MutableVertexPartition
+except ImportError:
+    class MutableVertexPartition: pass
+    MutableVertexPartition.__module__ = 'louvain.VertexPartition'
+
 
 def louvain(
-        adata,
-        resolution=None,
-        random_state=0,
-        restrict_to=None,
-        key_added=None,
-        adjacency=None,
-        flavor='vtraag',
-        directed=True,
-        copy=False):
+    adata: AnnData,
+    resolution: Optional[float] = None,
+    random_state: int = 0,
+    restrict_to: Optional[Tuple[str, Sequence[str]]] = None,
+    key_added: Optional[str] = None,
+    adjacency: Optional[spmatrix] = None,
+    flavor: str = 'vtraag',
+    directed: bool = True,
+    use_weights: bool = False,
+    partition_type: Optional[Type[MutableVertexPartition]] = None,
+    partition_kwargs: Optional[Mapping[str, Any]]=None,
+    copy: bool = False,
+) -> Optional[AnnData]:
     """Cluster cells into subgroups [Blondel08]_ [Levine15]_ [Traag17]_.
 
     Cluster cells using the Louvain algorithm [Blondel08]_ in the implementation
     of [Traag17]_. The Louvain algorithm has been proposed for single-cell
     analysis by [Levine15]_.
 
-    This requires to run :func:`~scanpy.api.pp.neighbors`, first.
+    This requires to run :func:`~scanpy.api.pp.neighbors` first.
 
     Parameters
     ----------
-    adata : :class:`~scanpy.api.AnnData`
+    adata
         The annotated data matrix.
-    resolution : `float` or `None`, optional (default: 1)
-        For the default flavor ('vtraag'), you can provide a resolution (higher
-        resolution means finding more and smaller clusters), which defaults to
-        1.0.
-    random_state : `int`, optional (default: 0)
+    resolution
+        For the default flavor (``'vtraag'``), you can provide a resolution
+        (higher resolution means finding more and smaller clusters),
+        which defaults to 1.0. See “Time as a resolution parameter” in [Lambiotte09]_.
+    random_state
         Change the initialization of the optimization.
-    restrict_to : `tuple`, optional (default: None)
+    restrict_to
         Restrict the clustering to the categories within the key for sample
-        annotation, tuple needs to contain (obs key, list of categories).
-    key_added : `str`, optional (default: 'louvain')
-        Key under which to add the cluster labels.
-    adjacency : sparse matrix or `None`, optional (default: `None`)
+        annotation, tuple needs to contain ``(obs_key, list_of_categories)``.
+    key_added
+        Key under which to add the cluster labels. (default: ``'louvain'``)
+    adjacency
         Sparse adjacency matrix of the graph, defaults to
-        `adata.uns['neighbors']['connectivities']`.
-    flavor : {'vtraag', 'igraph'}
-        Choose between to packages for computing the clustering. 'vtraag' is
-        much more powerful.
-    copy : `bool` (default: `False`)
+        ``adata.uns['neighbors']['connectivities']``.
+    flavor : {``'vtraag'``, ``'igraph'``}
+        Choose between to packages for computing the clustering.
+        ``'vtraag'`` is much more powerful, and the default.
+    directed
+        Interpret the ``adjacency`` matrix as directed graph?
+    use_weights
+        Use weights from knn graph.
+    partition_type
+        Type of partition to use.
+        Only a valid argument if ``flavor`` is ``'vtraag'``.
+    partition_kwargs
+        Key word arguments to pass to partitioning,
+        if ``vtraag`` method is being used.
+    copy
         Copy adata or modify it inplace.
 
     Returns
     -------
-    Depending on `copy`, returns or updates `adata` with the following fields.
+    :obj:`None`
+        By default (``copy=False``), updates ``adata`` with the following fields:
 
-    louvain : `pd.Series` (``adata.obs``, dtype `category`)
-        Array of dim (number of samples) that stores the subgroup id ('0',
-        '1', ...) for each cell.
+        ``adata.obs['louvain']`` (:class:`pandas.Series`, dtype ``category``)
+            Array of dim (number of samples) that stores the subgroup id
+            (``'0'``, ``'1'``, ...) for each cell.
+
+    :class:`~anndata.AnnData`
+        When ``copy=True`` is set, a copy of ``adata`` with those fields is returned.
     """
     logg.info('running Louvain clustering', r=True)
+    if (flavor != 'vtraag') and (partition_type is not None):
+        raise ValueError(
+            '`partition_type` is only a valid argument when `flavour` is "vtraag"')
     adata = adata.copy() if copy else adata
     if adjacency is None and 'neighbors' not in adata.uns:
         raise ValueError(
@@ -83,26 +115,29 @@ def louvain(
             directed = False
         if not directed: logg.m('    using the undirected graph', v=4)
         g = utils.get_igraph_from_adjacency(adjacency, directed=directed)
+        if use_weights:
+            weights = np.array(g.es["weight"]).astype(np.float64)
+        else:
+            weights = None
         if flavor == 'vtraag':
             import louvain
-            if resolution is None: resolution = 1
-            try:
-                logg.info('    using the "louvain" package of Traag (2017)')
-                louvain.set_rng_seed(random_state)
-                part = louvain.find_partition(g, louvain.RBConfigurationVertexPartition,
-                                              resolution_parameter=resolution)
-                # adata.uns['louvain_quality'] = part.quality()
-            except AttributeError:
-                logg.warn('Did not find package louvain>=0.6, '
-                          'the clustering result will therefore not '
-                          'be 100% reproducible, '
-                          'but still meaningful. '
-                          'If you want 100% reproducible results, '
-                          'update via "pip install louvain --upgrade".')
-                part = louvain.find_partition(g, method='RBConfiguration',
-                                              resolution_parameter=resolution)
-        elif flavor == 'igraph':
-            part = g.community_multilevel()
+            if partition_kwargs is None:
+                partition_kwargs = {}
+            if partition_type is None:
+                partition_type = louvain.RBConfigurationVertexPartition
+            if resolution is not None:
+                partition_kwargs["resolution_parameter"] = resolution
+            if use_weights:
+                partition_kwargs["weights"] = weights
+            logg.info('    using the "louvain" package of Traag (2017)')
+            louvain.set_rng_seed(random_state)
+            part = louvain.find_partition(
+                g, partition_type,
+                **partition_kwargs,
+            )
+            # adata.uns['louvain_quality'] = part.quality()
+        else:
+            part = g.community_multilevel(weights=weights)
         groups = np.array(part.membership)
     elif flavor == 'taynaud':
         # this is deprecated
@@ -124,11 +159,13 @@ def louvain(
             categories=natsorted(unique_groups.astype('U')))
     else:
         key_added = restrict_key + '_R' if key_added is None else key_added
-        adata.obs[key_added] = adata.obs[restrict_key].astype('U')
-        adata.obs[key_added].iloc[restrict_indices] = '-'.join(restrict_categories) + ','
-        adata.obs[key_added].iloc[restrict_indices] += groups.astype('U')
-        adata.obs[key_added] = adata.obs[key_added].astype(
-            'category', categories=natsorted(adata.obs[key_added].unique()))
+        all_groups = adata.obs[restrict_key].astype('U')
+        prefix = '-'.join(restrict_categories) + ','
+        new_groups = [prefix + g for g in groups.astype('U')]
+        all_groups.iloc[restrict_indices] = new_groups
+        adata.obs[key_added] = pd.Categorical(
+            values=all_groups,
+            categories=natsorted(all_groups.unique()))
     adata.uns['louvain'] = {}
     adata.uns['louvain']['params'] = {'resolution': resolution, 'random_state': random_state}
     logg.info('    finished', time=True, end=' ' if settings.verbosity > 2 else '\n')

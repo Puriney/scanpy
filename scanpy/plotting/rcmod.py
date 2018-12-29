@@ -1,4 +1,4 @@
-"""Overwrite matplotlib's and seaborn's default rcParams.
+"""Set the default matplotlib.rcParams.
 """
 
 import matplotlib
@@ -7,7 +7,8 @@ from cycler import cycler
 
 from . import palettes
 
-def set_rcParams_scanpy(fontsize=14):
+
+def set_rcParams_scanpy(fontsize=14, color_map=None):
     """Set matplotlib.rcParams to Scanpy defaults."""
 
     # figure
@@ -17,16 +18,18 @@ def set_rcParams_scanpy(fontsize=14):
     rcParams['figure.subplot.bottom'] = 0.15
     rcParams['figure.subplot.top'] = 0.91
 
-    rcParams['lines.linewidth'] = 1.5
+    rcParams['lines.linewidth'] = 1.5  # the line width of the frame
     rcParams['lines.markersize'] = 6
     rcParams['lines.markeredgewidth'] = 1
 
     # font
-    rcParams['font.sans-serif'] = ['Arial',
-                                   'Helvetica',
-                                   'DejaVu Sans',
-                                   'Bitstream Vera Sans',
-                                   'sans-serif']
+    rcParams['font.sans-serif'] = [
+        'Arial',
+        'Helvetica',
+        'DejaVu Sans',
+        'Bitstream Vera Sans',
+        'sans-serif',
+    ]
     fontsize = fontsize
     rcParams['font.size'] = fontsize
     rcParams['legend.fontsize'] = 0.92 * fontsize
@@ -58,7 +61,7 @@ def set_rcParams_scanpy(fontsize=14):
     rcParams['grid.color'] = '.8'
 
     # color map
-    rcParams['image.cmap'] = 'RdBu_r'  # seaborn 0.8.0 now has 'rocket'
+    rcParams['image.cmap'] = rcParams['image.cmap'] if color_map is None else color_map
 
 
 def set_rcParams_defaults():

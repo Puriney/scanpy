@@ -1,174 +1,54 @@
-"""Plotting
-
-Plotting functions for each tool and toplevel plotting functions for AnnData.
-"""
-
 import numpy as np
 import pandas as pd
-from pandas.api.types import is_categorical_dtype
-import networkx as nx
 from scipy.sparse import issparse
 from matplotlib import pyplot as pl
-from matplotlib.colors import is_color_like
 from matplotlib import rcParams
 
 from .. import utils
-from ... import utils as sc_utils
-from ... import settings
+from ...utils import doc_params
 from ... import logging as logg
 from ..anndata import scatter, ranking
-from ..utils import matrix
 from ..utils import timeseries, timeseries_subplot, timeseries_as_heatmap
-
+from ..docs import doc_scatter_bulk, doc_show_save_ax
+from .scatterplots import pca
 # ------------------------------------------------------------------------------
-# Visualization tools
+# PCA
 # ------------------------------------------------------------------------------
 
 
-def pca(adata, **params):
-    """Plot PCA results.
+@doc_params(scatter_bulk=doc_scatter_bulk, show_save_ax=doc_show_save_ax)
+def pca_overview(adata, **params):
+    """\
+    Plot PCA results.
 
     The parameters are the ones of the scatter plot. Call pca_ranking separately
     if you want to change the default settings.
 
     Parameters
     ----------
-    adata : :class:`~scanpy.api.AnnData`
+    adata : :class:`~anndata.AnnData`
         Annotated data matrix.
-    color : string or list of strings, optional (default: None)
+    color : string or list of strings, optional (default: `None`)
         Keys for observation/cell annotation either as list `["ann1", "ann2"]` or
         string `"ann1,ann2,..."`.
     use_raw : `bool`, optional (default: `True`)
         Use `raw` attribute of `adata` if present.
-    sort_order : `bool`, optional (default: `True`)
-        For continuous annotations used as color parameter, plot data points
-        with higher values on top of others.
-    groups : str, optional (default: all groups)
-        Restrict to a few categories in categorical observation annotation.
-    components : str or list of str, optional (default: '1,2')
-         String of the form '1,2' or ['1,2', '2,3'].
-    projection : {'2d', '3d'}, optional (default: '2d')
-         Projection of plot.
-    legend_loc : str, optional (default: 'right margin')
-         Options for keyword argument 'loc'.
-    legend_fontsize : int (default: None)
-         Legend font size.
-    color_map : str (default: `matplotlib.rcParams['image.cmap']`)
-         String denoting matplotlib color map.
-    palette : list of str (default: None)
-         Colors to use for plotting groups (categorical annotation).
-    right_margin : float or list of floats (default: None)
-         Adjust the width of the space right of each plotting panel.
-    size : float (default: None)
-         Point size.
-    title : str, optional (default: None)
-         Provide title for panels either as `["title1", "title2", ...]` or
-         `"title1,title2,..."`.
-    show : bool, optional (default: None)
+    {scatter_bulk}
+    show : bool, optional (default: `None`)
          Show the plot, do not return axis.
     save : `bool` or `str`, optional (default: `None`)
         If `True` or a `str`, save the figure. A string is appended to the
-        default filename. Infer the filetype if ending on \{'.pdf', '.png', '.svg'\}.
+        default filename. Infer the filetype if ending on {{'.pdf', '.png', '.svg'}}.
     """
     show = params['show'] if 'show' in params else None
     if 'show' in params: del params['show']
-    pca_scatter(adata, **params, show=False)
+    scatterplots.pca(adata, **params, show=False)
     pca_loadings(adata, show=False)
     pca_variance_ratio(adata, show=show)
 
 
-def pca_scatter(
-        adata,
-        color=None,
-        use_raw=True,
-        sort_order=True,
-        alpha=None,
-        groups=None,
-        components=None,
-        projection='2d',
-        legend_loc='right margin',
-        legend_fontsize=None,
-        legend_fontweight=None,
-        color_map=None,
-        palette=None,
-        right_margin=None,
-        size=None,
-        title=None,
-        show=None,
-        save=None,
-        ax=None):
-    """Scatter plot in PCA coordinates.
-
-    Parameters
-    ----------
-    adata : :class:`~scanpy.api.AnnData`
-        Annotated data matrix.
-    layout : {'fr', 'drl', ...}, optional (default: last computed)
-        One of the `draw_graph` layouts, see sc.tl.draw_graph. By default,
-        the last computed layout is taken.
-    color : string or list of strings, optional (default: None)
-        Keys for observation/cell annotation either as list `["ann1", "ann2"]` or
-        string `"ann1,ann2,..."`.
-    use_raw : `bool`, optional (default: `True`)
-        Use `raw` attribute of `adata` if present.
-    sort_order : `bool`, optional (default: `True`)
-        For continuous annotations used as color parameter, plot data points
-        with higher values on top of others.
-    groups : str, optional (default: all groups)
-        Restrict to a few categories in categorical observation annotation.
-    components : str or list of str, optional (default: '1,2')
-         String of the form '1,2' or ['1,2', '2,3'].
-    legend_loc : str, optional (default: 'right margin')
-         Location of legend, either 'on data', 'right margin' or valid keywords
-         for matplotlib.legend.
-    legend_fontsize : int (default: None)
-         Legend font size.
-    color_map : str (default: `matplotlib.rcParams['image.cmap']`)
-         String denoting matplotlib color map.
-    palette : list of str (default: None)
-         Colors to use for plotting groups (categorical annotation).
-    right_margin : float or list of floats (default: None)
-         Adjust the width of the space right of each plotting panel.
-    size : float (default: None)
-         Point size.
-    title : str, optional (default: None)
-         Provide title for panels either as `["title1", "title2", ...]` or
-         `"title1,title2,..."`.
-    show : bool, optional (default: None)
-         Show the plot, do not return axis.
-    save : `bool` or `str`, optional (default: `None`)
-        If `True` or a `str`, save the figure. A string is appended to the
-        default filename. Infer the filetype if ending on \{'.pdf', '.png', '.svg'\}.
-    ax : matplotlib.Axes
-         A matplotlib axes object.
-
-    Returns
-    -------
-    If `show==False`, a list of `matplotlib.Axis` objects. Every second element
-    corresponds to the 'right margin' drawing area for color bars and legends.
-    """
-    axs = scatter(
-        adata,
-        basis='pca',
-        color=color,
-        use_raw=use_raw,
-        sort_order=sort_order,
-        alpha=alpha,
-        groups=groups,
-        components=components,
-        projection=projection,
-        legend_loc=legend_loc,
-        legend_fontsize=legend_fontsize,
-        legend_fontweight=legend_fontweight,
-        color_map=color_map,
-        palette=palette,
-        right_margin=right_margin,
-        size=size,
-        title=title,
-        show=False,
-        save=False, ax=ax)
-    utils.savefig_or_show('pca_scatter', show=show, save=save)
-    if show == False: return axs
+# backwards compat
+pca_scatter = pca
 
 
 def pca_loadings(adata, components=None, show=None, save=None):
@@ -176,16 +56,16 @@ def pca_loadings(adata, components=None, show=None, save=None):
 
     Parameters
     ----------
-    adata : :class:`~scanpy.api.AnnData`
+    adata : :class:`~anndata.AnnData`
         Annotated data matrix.
     components : str or list of integers, optional
         For example, ``'1,2,3'`` means ``[1, 2, 3]``, first, second, third
         principal component.
-    show : bool, optional (default: None)
+    show : bool, optional (default: `None`)
         Show the plot, do not return axis.
     save : `bool` or `str`, optional (default: `None`)
         If `True` or a `str`, save the figure. A string is appended to the
-        default filename. Infer the filetype if ending on \{'.pdf', '.png', '.svg'\}.
+        default filename. Infer the filetype if ending on {'.pdf', '.png', '.svg'}.
     """
     if components is None: components = [1, 2, 3]
     elif isinstance(components, str): components = components.split(',')
@@ -194,566 +74,29 @@ def pca_loadings(adata, components=None, show=None, save=None):
     utils.savefig_or_show('pca_loadings', show=show, save=save)
 
 
-def pca_variance_ratio(adata, log=False, show=None, save=None):
+def pca_variance_ratio(adata, n_pcs=30, log=False, show=None, save=None):
     """Plot the variance ratio.
 
     Parameters
     ----------
-    show : bool, optional (default: None)
+    n_pcs : `int`, optional (default: `30`)
+         Number of PCs to show.
+    log : `bool`, optional (default: `False`)
+         Plot on logarithmic scale..
+    show : `bool`, optional (default: `None`)
          Show the plot, do not return axis.
     save : `bool` or `str`, optional (default: `None`)
         If `True` or a `str`, save the figure. A string is appended to the
-        default filename. Infer the filetype if ending on \{'.pdf', '.png', '.svg'\}.
+        default filename. Infer the filetype if ending on {'.pdf', '.png', '.svg'}.
     """
-    ranking(adata, 'uns', 'variance_ratio', dictionary='pca', labels='PC', log=log)
+    ranking(adata, 'uns', 'variance_ratio', n_points=n_pcs, dictionary='pca', labels='PC', log=log)
     utils.savefig_or_show('pca_variance_ratio', show=show, save=save)
-
-
-def diffmap(
-        adata,
-        color=None,
-        use_raw=True,
-        sort_order=True,
-        alpha=None,
-        groups=None,
-        components=None,
-        projection='2d',
-        legend_loc='right margin',
-        legend_fontsize=None,
-        legend_fontweight=None,
-        color_map=None,
-        palette=None,
-        right_margin=None,
-        size=None,
-        title=None,
-        show=None,
-        save=None, ax=None):
-    """Scatter plot in Diffusion Map basis.
-
-    Parameters
-    ----------
-    adata : :class:`~scanpy.api.AnnData`
-        Annotated data matrix.
-    color : string or list of strings, optional (default: None)
-        Keys for observation/cell annotation either as list `["ann1", "ann2"]` or
-        string `"ann1,ann2,..."`.
-    use_raw : `bool`, optional (default: `True`)
-        Use `raw` attribute of `adata` if present.
-    sort_order : `bool`, optional (default: `True`)
-        For continuous annotations used as color parameter, plot data points
-        with higher values on top of others.
-    groups : str, optional (default: all groups)
-        Restrict to a few categories in categorical observation annotation.
-    components : str or list of str, optional (default: '1,2')
-         String of the form '1,2' or ['1,2', '2,3'].
-    projection : {'2d', '3d'}, optional (default: '2d')
-         Projection of plot.
-    legend_loc : str, optional (default: 'right margin')
-         Location of legend, either 'on data', 'right margin' or valid keywords
-         for matplotlib.legend.
-    legend_fontsize : int (default: None)
-         Legend font size.
-    color_map : str (default: `matplotlib.rcParams['image.cmap']`)
-         String denoting matplotlib color map.
-    palette : list of str (default: None)
-         Colors cycle to use for categorical groups.
-    right_margin : float or list of floats (default: None)
-         Adjust the width of the space right of each plotting panel.
-    size : float (default: None)
-         Point size.
-    title : str, optional (default: None)
-         Provide title for panels either as `["title1", "title2", ...]` or
-         `"title1,title2,..."`.
-    show : bool, optional (default: None)
-         Show the plot, do not return axis.
-    save : `bool` or `str`, optional (default: `None`)
-        If `True` or a `str`, save the figure. A string is appended to the
-        default filename. Infer the filetype if ending on \{'.pdf', '.png', '.svg'\}.
-    ax : matplotlib.Axes
-         A matplotlib axes object. Only works if plotting a single component.
-    """
-    if components == 'all':
-        components_list = ['{},{}'.format(*((i, i+1) if i % 2 == 1 else (i+1, i)))
-            for i in range(1, adata.obsm['X_diffmap'].shape[1])]
-    else:
-        if components is None: components = '1,2' if '2d' in projection else '1,2,3'
-        if not isinstance(components, list): components_list = [components]
-        else: components_list = components
-    for components in components_list:
-        axs = scatter(
-            adata,
-            basis='diffmap',
-            color=color,
-            use_raw=use_raw,
-            sort_order=sort_order,
-            alpha=alpha,
-            groups=groups,
-            components=components,
-            projection=projection,
-            legend_loc=legend_loc,
-            legend_fontsize=legend_fontsize,
-            legend_fontweight=legend_fontweight,
-            color_map=color_map,
-            palette=palette,
-            right_margin=right_margin,
-            size=size,
-            title=title,
-            show=False,
-            save=False,
-            ax=ax)
-        writekey = 'diffmap'
-        if isinstance(components, list): components = ','.join(
-            [str(comp) for comp in components])
-        writekey += ('_components' + components.replace(',', '')
-                     + (save if isinstance(save, str) else ''))
-        if settings.autosave or (save is not None):
-            utils.savefig(writekey)
-    show = settings.autoshow if show is None else show
-    if not settings.autosave and show: pl.show()
-    if show == False: return axs
-
-
-def draw_graph(
-        adata,
-        edges=False,
-        edges_width=0.1,
-        edges_color='grey',
-        layout=None,
-        color=None,
-        use_raw=True,
-        sort_order=True,
-        alpha=None,
-        groups=None,
-        components=None,
-        legend_loc='right margin',
-        legend_fontsize=None,
-        legend_fontweight=None,
-        color_map=None,
-        palette=None,
-        right_margin=None,
-        size=None,
-        title=None,
-        show=None,
-        save=None,
-        ax=None):
-    """Scatter plot in graph-drawing basis.
-
-    Parameters
-    ----------
-    adata : :class:`~scanpy.api.AnnData`
-        Annotated data matrix.
-    edges : `bool`, optional (default: `False`)
-        Show edges.
-    edges_width : `float`, optional (default: 0.1)
-        Width of edges.
-    edges_color : matplotlib color, optional (default: 'grey')
-        Color of edges.
-    layout : {'fr', 'drl', ...}, optional (default: last computed)
-        One of the `draw_graph` layouts, see sc.tl.draw_graph. By default,
-        the last computed layout is taken.
-    color : string or list of strings, optional (default: None)
-        Keys for observation/cell annotation either as list `["ann1", "ann2"]` or
-        string `"ann1,ann2,..."`.
-    use_raw : `bool`, optional (default: `True`)
-        Use `raw` attribute of `adata` if present.
-    sort_order : `bool`, optional (default: `True`)
-        For continuous annotations used as color parameter, plot data points
-        with higher values on top of others.
-    groups : str, optional (default: all groups)
-        Restrict to a few categories in categorical observation annotation.
-    components : str or list of str, optional (default: '1,2')
-         String of the form '1,2' or ['1,2', '2,3'].
-    legend_loc : str, optional (default: 'right margin')
-         Location of legend, either 'on data', 'right margin' or valid keywords
-         for matplotlib.legend.
-    legend_fontsize : int (default: None)
-         Legend font size.
-    color_map : str (default: `matplotlib.rcParams['image.cmap']`)
-         String denoting matplotlib color map.
-    palette : list of str (default: None)
-         Colors to use for plotting groups (categorical annotation).
-    right_margin : float or list of floats (default: None)
-         Adjust the width of the space right of each plotting panel.
-    size : float (default: None)
-         Point size.
-    title : str, optional (default: None)
-         Provide title for panels either as `["title1", "title2", ...]` or
-         `"title1,title2,..."`.
-    show : bool, optional (default: None)
-         Show the plot, do not return axis.
-    save : `bool` or `str`, optional (default: `None`)
-        If `True` or a `str`, save the figure. A string is appended to the
-        default filename. Infer the filetype if ending on \{'.pdf', '.png', '.svg'\}.
-    ax : matplotlib.Axes
-         A matplotlib axes object.
-
-    Returns
-    -------
-    If `show==False`, a list of `matplotlib.Axis` objects. Every second element
-    corresponds to the 'right margin' drawing area for color bars and legends.
-    """
-    if layout is None: layout = str(adata.uns['draw_graph']['params']['layout'])
-    basis = 'draw_graph_' + layout
-    if 'X_' + basis not in adata.obsm_keys():
-        raise ValueError('Did not find {} in adata.obs. Did you compute layout {}?'
-                         .format('draw_graph_' + layout, layout))
-    axs = scatter(
-        adata,
-        basis=basis,
-        color=color,
-        use_raw=use_raw,
-        sort_order=sort_order,
-        alpha=alpha,
-        groups=groups,
-        components=components,
-        projection='2d',
-        legend_loc=legend_loc,
-        legend_fontsize=legend_fontsize,
-        legend_fontweight=legend_fontweight,
-        color_map=color_map,
-        palette=palette,
-        right_margin=right_margin,
-        size=size,
-        title=title,
-        show=False,
-        save=False,
-        ax=ax)
-    if edges:
-        for ax in axs:
-            g = nx.Graph(adata.uns['neighbors']['connectivities'])
-            edge_collection = nx.draw_networkx_edges(
-                g, adata.obsm['X_' + basis],
-                ax=ax, width=edges_width, edge_color=edges_color)
-            edge_collection.set_zorder(-2)
-    utils.savefig_or_show('scatter' if basis is None else basis, show=show, save=save)
-    if show == False: return axs
-
-
-def tsne(
-        adata,
-        color=None,
-        use_raw=True,
-        sort_order=True,
-        alpha=None,
-        groups=None,
-        legend_loc='right margin',
-        legend_fontsize=None,
-        legend_fontweight=None,
-        color_map=None,
-        palette=None,
-        right_margin=None,
-        size=None,
-        title=None,
-        show=None,
-        save=None, ax=None):
-    """Scatter plot in tSNE basis.
-
-    Parameters
-    ----------
-    adata : :class:`~scanpy.api.AnnData`
-        Annotated data matrix.
-    color : string or list of strings, optional (default: None)
-        Keys for observation/cell annotation either as list `["ann1", "ann2"]` or
-        string `"ann1,ann2,..."`.
-    use_raw : `bool`, optional (default: `True`)
-        Use `raw` attribute of `adata` if present.
-    sort_order : `bool`, optional (default: `True`)
-        For continuous annotations used as color parameter, plot data points
-        with higher values on top of others.
-    groups : str, optional (default: all groups)
-        Restrict to a few categories in categorical observation annotation.
-    legend_loc : str, optional (default: 'right margin')
-         Location of legend, either 'on data', 'right margin' or valid keywords
-         for matplotlib.legend.
-    legend_fontsize : int (default: None)
-         Legend font size.
-    color_map : str (default: `matplotlib.rcParams['image.cmap']`)
-         String denoting matplotlib color map.
-    palette : list of str (default: None)
-         Colors to use for plotting groups (categorical annotation).
-    right_margin : float or list of floats (default: None)
-         Adjust the width of the space right of each plotting panel.
-    size : float (default: None)
-         Point size.
-    title : str, optional (default: None)
-         Provide title for panels either as `["title1", "title2", ...]` or
-         `"title1,title2,..."`.
-    show : bool, optional (default: None)
-         Show the plot, do not return axis.
-    save : `bool` or `str`, optional (default: `None`)
-        If `True` or a `str`, save the figure. A string is appended to the
-        default filename. Infer the filetype if ending on \{'.pdf', '.png', '.svg'\}.
-    ax : matplotlib.Axes
-         A matplotlib axes object.
-
-    Returns
-    -------
-    If `show==False`, a list of `matplotlib.Axis` objects. Every second element
-    corresponds to the 'right margin' drawing area for color bars and legends.
-    """
-    axs = scatter(
-        adata,
-        basis='tsne',
-        color=color,
-        use_raw=use_raw,
-        sort_order=sort_order,
-        alpha=alpha,
-        groups=groups,
-        legend_loc=legend_loc,
-        legend_fontsize=legend_fontsize,
-        legend_fontweight=legend_fontweight,
-        color_map=color_map,
-        palette=palette,
-        right_margin=right_margin,
-        size=size,
-        title=title,
-        show=show,
-        save=save,
-        ax=ax)
-    if show == False: return axs
-
-
-def umap(
-        adata,
-        color=None,
-        use_raw=True,
-        sort_order=True,
-        alpha=None,
-        groups=None,
-        components=None,
-        projection='2d',
-        legend_loc='right margin',
-        legend_fontsize=None,
-        legend_fontweight=None,
-        color_map=None,
-        palette=None,
-        right_margin=None,
-        size=None,
-        title=None,
-        show=None,
-        save=None, ax=None):
-    """Scatter plot in UMAP basis.
-
-    Parameters
-    ----------
-    adata : :class:`~scanpy.api.AnnData`
-        Annotated data matrix.
-    color : string or list of strings, optional (default: None)
-        Keys for observation/cell annotation either as list `["ann1", "ann2"]` or
-        string `"ann1,ann2,..."`.
-    use_raw : `bool`, optional (default: `True`)
-        Use `raw` attribute of `adata` if present.
-    sort_order : `bool`, optional (default: `True`)
-        For continuous annotations used as color parameter, plot data points
-        with higher values on top of others.
-    groups : str, optional (default: all groups)
-        Restrict to a few categories in categorical observation annotation.
-    components : str or list of str, optional (default: '1,2')
-         String of the form '1,2' or ['1,2', '2,3'].
-    projection : {'2d', '3d'}, optional (default: '2d')
-         Projection of plot.
-    legend_loc : str, optional (default: 'right margin')
-         Location of legend, either 'on data', 'right margin' or valid keywords
-         for matplotlib.legend.
-    legend_fontsize : int (default: None)
-         Legend font size.
-    color_map : str (default: `matplotlib.rcParams['image.cmap']`)
-         String denoting matplotlib color map.
-    palette : list of str (default: None)
-         Colors to use for plotting groups (categorical annotation).
-    right_margin : float or list of floats (default: None)
-         Adjust the width of the space right of each plotting panel.
-    size : float (default: None)
-         Point size.
-    title : str, optional (default: None)
-         Provide title for panels either as `["title1", "title2", ...]` or
-         `"title1,title2,..."`.
-    show : bool, optional (default: None)
-         Show the plot, do not return axis.
-    save : `bool` or `str`, optional (default: `None`)
-        If `True` or a `str`, save the figure. A string is appended to the
-        default filename. Infer the filetype if ending on \{'.pdf', '.png', '.svg'\}.
-    ax : matplotlib.Axes
-         A matplotlib axes object.
-
-    Returns
-    -------
-    If `show==False`, a list of `matplotlib.Axis` objects. Every second element
-    corresponds to the 'right margin' drawing area for color bars and legends.
-    """
-    axs = scatter(
-        adata,
-        basis='umap',
-        color=color,
-        use_raw=use_raw,
-        sort_order=sort_order,
-        alpha=alpha,
-        groups=groups,
-        components=components,
-        projection=projection,
-        legend_loc=legend_loc,
-        legend_fontsize=legend_fontsize,
-        legend_fontweight=legend_fontweight,
-        color_map=color_map,
-        palette=palette,
-        right_margin=right_margin,
-        size=size,
-        title=title,
-        show=show,
-        save=save,
-        ax=ax)
-    if show == False: return axs
 
 
 # ------------------------------------------------------------------------------
 # Subgroup identification and ordering - clustering, pseudotime, branching
 # and tree inference tools
 # ------------------------------------------------------------------------------
-
-
-def dpt(
-        adata,
-        basis='diffmap',
-        color=None,
-        alpha=None,
-        groups=None,
-        components=None,
-        projection='2d',
-        legend_loc='right margin',
-        legend_fontsize=None,
-        legend_fontweight=None,
-        color_map=None,
-        palette=None,
-        right_margin=None,
-        size=None,
-        title=None,
-        show=None,
-        save=None):
-    """Plot results of DPT analysis.
-
-    Parameters
-    ----------
-    adata : :class:`~scanpy.api.AnnData`
-        Annotated data matrix.
-    basis : {`'diffmap'`, `'pca'`, `'tsne'`, `'draw_graph_...'`}
-        Choose the basis in which to plot.
-    color : string or list of strings, optional (default: None)
-        Observation/ cell annotation for coloring in the form "ann1,ann2,...". String
-        annotation is plotted assuming categorical annotation, float and integer
-        annotation is plotted assuming continuous annoation.
-    groups : str, optional (default: all groups)
-        Restrict to a few categories in categorical observation annotation.
-    components : str or list of str, optional (default: '1,2')
-         String of the form '1,2' or ['1,2', '2,3'].
-    projection : {'2d', '3d'}, optional (default: '2d')
-         Projection of plot.
-    legend_loc : str, optional (default: 'right margin')
-         Location of legend, either 'on data', 'right margin' or valid keywords
-         for matplotlib.legend.
-    legend_fontsize : int (default: None)
-         Legend font size.
-    color_map : str (default: `matplotlib.rcParams['image.cmap']`)
-         String denoting matplotlib color map.
-    palette : list of str (default: None)
-         Colors to use for plotting groups (categorical annotation).
-    right_margin : float or list of floats (default: None)
-         Adjust the width of the space right of each plotting panel.
-    size : float (default: None)
-         Point size.
-    title : str, optional (default: None)
-         Provide title for panels either as `["title1", "title2", ...]` or
-         `"title1,title2,..."`.
-    show : bool, optional (default: None)
-         Show the plot, do not return axis.
-    save : `bool` or `str`, optional (default: `None`)
-        If `True` or a `str`, save the figure. A string is appended to the
-        default filename. Infer the filetype if ending on \{'.pdf', '.png', '.svg'\}.
-    ax : matplotlib.Axes
-         A matplotlib axes object.
-    show_tree : bool, optional (default: False)
-         This shows the inferred tree. For more than a single branching, the
-         result is pretty unreliable. Use tool `aga` (Approximate Graph
-         Abstraction) instead.
-    """
-    colors = ['dpt_pseudotime']
-    if len(np.unique(adata.obs['dpt_groups'].values)) > 1: colors += ['dpt_groups']
-    if color is not None: colors = color
-    dpt_scatter(
-        adata,
-        basis=basis,
-        color=color,
-        alpha=alpha,
-        groups=groups,
-        components=components,
-        projection=projection,
-        legend_loc=legend_loc,
-        legend_fontsize=legend_fontsize,
-        legend_fontweight=legend_fontweight,
-        color_map=color_map,
-        palette=palette,
-        right_margin=right_margin,
-        size=size,
-        title=title,
-        show=False,
-        save=save)
-    dpt_groups_pseudotime(adata, color_map=color_map, show=False, save=save)
-    dpt_timeseries(adata, color_map=color_map, show=show, save=save)
-
-
-def dpt_scatter(
-        adata,
-        basis='diffmap',
-        color=None,
-        alpha=None,
-        groups=None,
-        components=None,
-        projection='2d',
-        legend_loc='right margin',
-        legend_fontsize=None,
-        legend_fontweight=None,
-        color_map=None,
-        palette=None,
-        right_margin=None,
-        size=None,
-        title=None,
-        show=None,
-        save=None):
-    """Scatter plot of DPT results.
-
-    See parameters of sc.pl.dpt().
-    """
-
-    colors = ['dpt_pseudotime']
-    if len(np.unique(adata.obs['dpt_groups'].values)) > 1: colors += ['dpt_groups']
-    if color is not None:
-        if not isinstance(color, list): colors = color.split(',')
-        else: colors = color
-    if components == 'all':
-        components_list = ['1,2', '1,3', '1,4', '1,5', '2,3', '2,4', '2,5', '3,4', '3,5', '4,5']
-    else:
-        if components is None:
-            components = '1,2' if '2d' in projection else '1,2,3'
-        if not isinstance(components, list): components_list = [components]
-        else: components_list = components
-    for components in components_list:
-        axs = scatter(
-            adata,
-            basis=basis,
-            color=colors,
-            groups=groups,
-            components=components,
-            projection=projection,
-            legend_loc=legend_loc,
-            legend_fontsize=legend_fontsize,
-            legend_fontweight=legend_fontweight,
-            color_map=color_map,
-            palette=palette,
-            right_margin=right_margin,
-            size=size,
-            title=title,
-            show=False)
-        writekey = 'dpt_' + basis + '_components' + components.replace(',', '')
-        utils.savefig_or_show(writekey, show=show, save=save)
 
 
 def dpt_timeseries(adata, color_map=None, show=None, save=None, as_heatmap=True):
@@ -808,258 +151,426 @@ def dpt_groups_pseudotime(adata, color_map=None, palette=None, show=None, save=N
     utils.savefig_or_show('dpt_groups_pseudotime', save=save, show=show)
 
 
-def louvain(
-        adata,
-        basis='tsne',
-        color=None,
-        alpha=None,
-        groups=None,
-        components=None,
-        projection='2d',
-        legend_loc='right margin',
-        legend_fontsize=None,
-        legend_fontweight=None,
-        color_map=None,
-        palette=None,
-        right_margin=None,
-        size=None,
-        title=None,
-        show=None,
-        save=None, ax=None):
-    """Plot results of Louvain clustering.
+@doc_params(show_save_ax=doc_show_save_ax)
+def rank_genes_groups(adata, groups=None, n_genes=20, gene_symbols=None, key=None, fontsize=8,
+                      ncols=4, sharey=True, show=None, save=None, ax=None, **kwds):
+    """\
+    Plot ranking of genes.
 
     Parameters
     ----------
-    adata : :class:`~scanpy.api.AnnData`
-        Annotated data matrix.
-    basis : {`'diffmap'`, `'pca'`, `'tsne'`, `'draw_graph_...'`}
-        Choose the basis in which to plot.
-    color : string or list of strings, optional (default: None)
-        Keys for observation/cell annotation either as list `["ann1", "ann2"]` or
-        string `"ann1,ann2,..."`.
-    groups : str, optional (default: all groups)
-        Restrict to a few categories in categorical observation annotation.
-    components : str or list of str, optional (default: '1,2')
-         String of the form '1,2' or ['1,2', '2,3'].
-    projection : {'2d', '3d'}, optional (default: '2d')
-         Projection of plot.
-    legend_loc : str, optional (default: 'right margin')
-         Location of legend, either 'on data', 'right margin' or valid keywords
-         for matplotlib.legend.
-    legend_fontsize : int (default: None)
-         Legend font size.
-    color_map : str (default: `matplotlib.rcParams['image.cmap']`)
-         String denoting matplotlib color map.
-    palette : list of str (default: None)
-         Colors to use for plotting groups (categorical annotation).
-    right_margin : float or list of floats (default: None)
-         Adjust the width of the space right of each plotting panel.
-    title : str, optional (default: None)
-         Provide title for panels either as `["title1", "title2", ...]` or
-         `"title1,title2,..."`.
-    show : bool, optional (default: None)
-         Show the plot, do not return axis.
-    save : `bool` or `str`, optional (default: `None`)
-        If `True` or a `str`, save the figure. A string is appended to the
-        default filename. Infer the filetype if ending on \{'.pdf', '.png', '.svg'\}.
-    ax : matplotlib.Axes
-         A matplotlib axes object.
-    """
-    add_color = []
-    if color is not None:
-        add_color = color if isinstance(color, list) else color.split(',')
-    color = ['louvain_groups'] + add_color
-    axs = scatter(
-        adata,
-        basis=basis,
-        color=color,
-        alpha=alpha,
-        groups=groups,
-        components=components,
-        projection=projection,
-        legend_loc=legend_loc,
-        legend_fontsize=legend_fontsize,
-        legend_fontweight=legend_fontweight,
-        color_map=color_map,
-        palette=palette,
-        right_margin=right_margin,
-        size=size,
-        title=title,
-        show=False,
-        save=False)
-    utils.savefig_or_show('louvain_' + basis, show=show, save=save)
-
-
-def rank_genes_groups(adata, groups=None, n_genes=20, fontsize=8, show=None, save=None, ext=None):
-    """Plot ranking of genes.
-
-    Parameters
-    ----------
-    adata : :class:`~scanpy.api.AnnData`
+    adata : :class:`~anndata.AnnData`
         Annotated data matrix.
     groups : `str` or `list` of `str`
         The groups for which to show the gene ranking.
+    gene_symbols : `str`
+        Key for field in `.var` that stores gene symbols if you do not want to
+        use `.var_names`.
     n_genes : `int`, optional (default: 20)
         Number of genes to show.
     fontsize : `int`, optional (default: 8)
         Fontsize for gene names.
-    show : `bool`, optional (default: `None`)
-        Show the plot, do not return axis.
-    save : `bool` or `str`, optional (default: `None`)
-        If `True` or a `str`, save the figure. A string is appended to the
-        default filename. Infer the filetype if ending on \{'.pdf', '.png', '.svg'\}.
-    ax : `matplotlib.Axes`, optional (default: `None`)
-        A `matplotlib.Axes` object.
+    ncols : `int`, optional (default: 4)
+        Number of panels shown per row.
+    sharey: `bool`, optional (default: True)
+        Controls if the y-axis of each panels should be shared. But passing
+        `sharey=False`, each panel has its own y-axis range.
+    {show_save_ax}
     """
-    groups_key = str(adata.uns['rank_genes_groups']['params']['groupby'])
-    reference = str(adata.uns['rank_genes_groups']['params']['reference'])
-    group_names = (adata.uns['rank_genes_groups']['names'].dtype.names
+    if 'n_panels_per_row' in kwds:  n_panels_per_row  = kwds['n_panels_per_row']
+    else: n_panels_per_row = ncols
+    if key is None: key = 'rank_genes_groups'
+    reference = str(adata.uns[key]['params']['reference'])
+    group_names = (adata.uns[key]['names'].dtype.names
                    if groups is None else groups)
     # one panel for each group
-    n_panels = len(group_names)
     # set up the figure
-    if n_panels <= 5:
-        n_panels_y = 1
-        n_panels_x = n_panels
-    else:
-        n_panels_y = 2
-        n_panels_x = int(n_panels/2+0.5)
+    n_panels_x = min(n_panels_per_row, len(group_names))
+    n_panels_y = np.ceil(len(group_names) / n_panels_x).astype(int)
+
     from matplotlib import gridspec
     fig = pl.figure(figsize=(n_panels_x * rcParams['figure.figsize'][0],
                              n_panels_y * rcParams['figure.figsize'][1]))
-    left = 0.2/n_panels_x
-    bottom = 0.13/n_panels_y
     gs = gridspec.GridSpec(nrows=n_panels_y,
                            ncols=n_panels_x,
-                           left=left,
-                           right=1-(n_panels_x-1)*left-0.01/n_panels_x,
-                           bottom=bottom,
-                           top=1-(n_panels_y-1)*bottom-0.1/n_panels_y,
-                           wspace=0.18)
+                           wspace=0.22,
+                           hspace=0.3)
 
+    ax0 = None
+    ymin = np.Inf
+    ymax = -np.Inf
     for count, group_name in enumerate(group_names):
-        pl.subplot(gs[count])
-        gene_names = adata.uns['rank_genes_groups']['names'][group_name]
-        scores = adata.uns['rank_genes_groups']['scores'][group_name]
+        if sharey is True:
+            if ax0 is None:
+                ax = fig.add_subplot(gs[count])
+                ax0 = ax
+            else:
+                ax = fig.add_subplot(gs[count], sharey=ax0)
+        else:
+            ax = fig.add_subplot(gs[count])
+
+        gene_names = adata.uns[key]['names'][group_name]
+        scores = adata.uns[key]['scores'][group_name]
         for ig, g in enumerate(gene_names[:n_genes]):
-            pl.text(ig, scores[ig], gene_names[ig],
+            gene_name = gene_names[ig]
+            if adata.raw is not None and adata.uns[key]['params']['use_raw']:
+                ax.text(
+                    ig, scores[ig],
+                    gene_name if gene_symbols is None else adata.raw.var[gene_symbols][gene_name],
                     rotation='vertical', verticalalignment='bottom',
                     horizontalalignment='center', fontsize=fontsize)
-        pl.title('{} vs. {}'.format(group_name, reference))
-        if n_panels <= 5 or count >= n_panels_x: pl.xlabel('ranking')
-        if count == 0 or count == n_panels_x: pl.ylabel('score')
-        ymin = np.min(scores)
-        ymax = np.max(scores)
+            else:
+                ax.text(
+                    ig, scores[ig],
+                    gene_name if gene_symbols is None else adata.var[gene_symbols][gene_name],
+                    rotation='vertical', verticalalignment='bottom',
+                    horizontalalignment='center', fontsize=fontsize)
+        ax.set_title('{} vs. {}'.format(group_name, reference))
+        if count >= n_panels_x * (n_panels_y - 1):
+            ax.set_xlabel('ranking')
+
+        # print the 'score' label only on the first panel per row.
+        if count % n_panels_x == 0:
+            ax.set_ylabel('score')
+
+        ax.set_xlim(-0.9, ig + 1-0.1)
+
+        if sharey is True:
+            ymin = min(ymin, np.min(scores))
+            ymax = max(ymax, np.max(scores))
+        else:
+            ymin = np.min(scores)
+            ymax = np.max(scores)
+            ymax += 0.3*(np.max(scores)-np.min(scores))
+            ax.set_ylim(ymin, ymax)
+
+    if sharey is True:
         ymax += 0.3*(ymax-ymin)
-        pl.ylim([ymin, ymax])
-        pl.xlim(-0.9, ig+1-0.1)
+        ax.set_ylim(ymin, ymax)
+
     writekey = ('rank_genes_groups_'
-                + str(adata.uns['rank_genes_groups']['params']['groupby']))
+                + str(adata.uns[key]['params']['groupby']))
     utils.savefig_or_show(writekey, show=show, save=save)
 
 
-def rank_genes_groups_violin(adata, groups=None, n_genes=20,
-                             use_raw=None,
-                             split=True,
-                             scale='width',
-                             strip=True, jitter=True, size=1,
-                             computed_distribution=False,
-                             ax=None, show=None, save=None):
-    """Plot ranking of genes for all tested comparisons.
+@doc_params(show_save_ax=doc_show_save_ax)
+def _rank_genes_groups_plot(adata, plot_type='heatmap', groups=None,
+                            n_genes=10, groupby=None, key=None,
+                            show=None, save=None, **kwds):
+    """\
+    Plot ranking of genes using the specified plot type
 
     Parameters
     ----------
-    adata : :class:`~scanpy.api.AnnData`
+    adata : :class:`~anndata.AnnData`
+        Annotated data matrix.
+    groups : `str` or `list` of `str`
+        The groups for which to show the gene ranking.
+    n_genes : `int`, optional (default: 10)
+        Number of genes to show.
+    groupby : `str` or `None`, optional (default: `None`)
+        The key of the observation grouping to consider. By default,
+        the groupby is chosen from the rank genes groups parameter but
+        other groupby options can be used.
+    {show_save_ax}
+    """
+    if key is None:
+        key = 'rank_genes_groups'
+
+    if 'dendrogram' not in kwds:
+        kwds['dendrogram'] = True
+    if groupby is None:
+        groupby = str(adata.uns[key]['params']['groupby'])
+    group_names = (adata.uns[key]['names'].dtype.names
+                   if groups is None else groups)
+
+    # make a list of tuples containing the index for the start gene and the
+    # end gene that should be labelled
+    group_positions = [(x, x + n_genes - 1) for x in range(0, n_genes * len(group_names), n_genes)]
+
+    # sum(list, []) is used to flatten the gene list
+    gene_names = sum([list(adata.uns[key]['names'][x][:n_genes]) for x in group_names], [])
+
+    if plot_type == 'dotplot':
+        from ..anndata import dotplot
+        dotplot(adata, gene_names, groupby, var_group_labels=group_names,
+                var_group_positions=group_positions, show=show, save=save, **kwds)
+
+    elif plot_type == 'heatmap':
+        from ..anndata import heatmap
+        heatmap(adata, gene_names, groupby, var_group_labels=group_names,
+                var_group_positions=group_positions, show=show, save=save, **kwds)
+
+    elif plot_type == 'stacked_violin':
+        from ..anndata import stacked_violin
+        return stacked_violin(adata, gene_names, groupby, var_group_labels=group_names,
+                       var_group_positions=group_positions, show=show, save=save, **kwds)
+
+    elif plot_type == 'tracksplot':
+        from ..anndata import tracksplot
+        return tracksplot(adata, gene_names, groupby, var_group_labels=group_names,
+                       var_group_positions=group_positions, show=show, save=save, **kwds)
+
+    elif plot_type == 'matrixplot':
+        from ..anndata import matrixplot
+        matrixplot(adata, gene_names, groupby, var_group_labels=group_names,
+                   var_group_positions=group_positions, show=show, save=save, **kwds)
+
+
+@doc_params(show_save_ax=doc_show_save_ax)
+def rank_genes_groups_heatmap(adata, groups=None, n_genes=10, groupby=None, key=None,
+                              show=None, save=None, **kwds):
+    """\
+    Plot ranking of genes using heatmap plot (see `scanpy.api.pl.heatmap`)
+
+    Parameters
+    ----------
+    adata : :class:`~anndata.AnnData`
+        Annotated data matrix.
+    groups : `str` or `list` of `str`
+        The groups for which to show the gene ranking.
+    n_genes : `int`, optional (default: 10)
+        Number of genes to show.
+    groupby : `str` or `None`, optional (default: `None`)
+        The key of the observation grouping to consider. By default,
+        the groupby is chosen from the rank genes groups parameter but
+        other groupby options can be used.  It is expected that
+        groupby is a categorical. If groupby is not a categorical observation,
+        it would be subdivided into `num_categories` (see `scanpy.api.pl.heatmap`).
+    key : `str`
+        Key used to store the ranking results in `adata.uns`.
+    **kwds : keyword arguments
+        Are passed to `scanpy.api.pl.heatmap`.
+    {show_save_ax}
+    """
+
+    _rank_genes_groups_plot(adata, plot_type='heatmap', groups=groups, n_genes=n_genes,
+                            groupby=groupby, key=key, show=show, save=save, **kwds)
+
+
+@doc_params(show_save_ax=doc_show_save_ax)
+def rank_genes_groups_tracksplot(adata, groups=None, n_genes=10, groupby=None, key=None,
+                              show=None, save=None, **kwds):
+    """\
+    Plot ranking of genes using heatmap plot (see `scanpy.api.pl.heatmap`)
+
+    Parameters
+    ----------
+    adata : :class:`~anndata.AnnData`
+        Annotated data matrix.
+    groups : `str` or `list` of `str`
+        The groups for which to show the gene ranking.
+    n_genes : `int`, optional (default: 10)
+        Number of genes to show.
+    groupby : `str` or `None`, optional (default: `None`)
+        The key of the observation grouping to consider. By default,
+        the groupby is chosen from the rank genes groups parameter but
+        other groupby options can be used.  It is expected that
+        groupby is a categorical. If groupby is not a categorical observation,
+        it would be subdivided into `num_categories` (see `scanpy.api.pl.heatmap`).
+    key : `str`
+        Key used to store the ranking results in `adata.uns`.
+    **kwds : keyword arguments
+        Are passed to `scanpy.api.pl.tracksplot`.
+    {show_save_ax}
+    """
+
+    _rank_genes_groups_plot(adata, plot_type='tracksplot', groups=groups, n_genes=n_genes,
+                            groupby=groupby, key=key, show=show, save=save, **kwds)
+
+
+@doc_params(show_save_ax=doc_show_save_ax)
+def rank_genes_groups_dotplot(adata, groups=None, n_genes=10, groupby=None, key=None,
+                              show=None, save=None, **kwds):
+    """\
+    Plot ranking of genes using dotplot plot (see `scanpy.api.pl.dotplot`)
+
+    Parameters
+    ----------
+    adata : :class:`~anndata.AnnData`
+        Annotated data matrix.
+    groups : `str` or `list` of `str`
+        The groups for which to show the gene ranking.
+    n_genes : `int`, optional (default: 10)
+        Number of genes to show.
+    groupby : `str` or `None`, optional (default: `None`)
+        The key of the observation grouping to consider. By default,
+        the groupby is chosen from the rank genes groups parameter but
+        other groupby options can be used.  It is expected that
+        groupby is a categorical. If groupby is not a categorical observation,
+        it would be subdivided into `num_categories` (see `scanpy.api.pl.dotplot`).
+    key : `str`
+        Key used to store the ranking results in `adata.uns`.
+    {show_save_ax}
+    **kwds : keyword arguments
+        Are passed to `scanpy.api.pl.dotplot`.
+    """
+
+    _rank_genes_groups_plot(adata, plot_type='dotplot', groups=groups, n_genes=n_genes,
+                            groupby=groupby, key=key, show=show, save=save, **kwds)
+
+
+@doc_params(show_save_ax=doc_show_save_ax)
+def rank_genes_groups_stacked_violin(adata, groups=None, n_genes=10, groupby=None, key=None,
+                                     show=None, save=None, **kwds):
+    """\
+    Plot ranking of genes using stacked_violin plot (see `scanpy.api.pl.stacked_violin`)
+
+    Parameters
+    ----------
+    adata : :class:`~anndata.AnnData`
+        Annotated data matrix.
+    groups : `str` or `list` of `str`
+        The groups for which to show the gene ranking.
+    n_genes : `int`, optional (default: 10)
+        Number of genes to show.
+    groupby : `str` or `None`, optional (default: `None`)
+        The key of the observation grouping to consider. By default,
+        the groupby is chosen from the rank genes groups parameter but
+        other groupby options can be used.  It is expected that
+        groupby is a categorical. If groupby is not a categorical observation,
+        it would be subdivided into `num_categories` (see `scanpy.api.pl.stacked_violin`).
+    key : `str`
+        Key used to store the ranking results in `adata.uns`.
+    {show_save_ax}
+    **kwds : keyword arguments
+        Are passed to `scanpy.api.pl.stacked_violin`.
+    """
+
+    _rank_genes_groups_plot(adata, plot_type='stacked_violin', groups=groups, n_genes=n_genes,
+                            groupby=groupby, key=key, show=show, save=save, **kwds)
+
+
+@doc_params(show_save_ax=doc_show_save_ax)
+def rank_genes_groups_matrixplot(adata, groups=None, n_genes=10, groupby=None, key=None,
+                                 show=None, save=None, **kwds):
+    """\
+    Plot ranking of genes using matrixplot plot (see `scanpy.api.pl.matrixplot`)
+
+    Parameters
+    ----------
+    adata : :class:`~anndata.AnnData`
+        Annotated data matrix.
+    groups : `str` or `list` of `str`
+        The groups for which to show the gene ranking.
+    n_genes : `int`, optional (default: 10)
+        Number of genes to show.
+    groupby : `str` or `None`, optional (default: `None`)
+        The key of the observation grouping to consider. By default,
+        the groupby is chosen from the rank genes groups parameter but
+        other groupby options can be used.  It is expected that
+        groupby is a categorical. If groupby is not a categorical observation,
+        it would be subdivided into `num_categories` (see `scanpy.api.pl.matrixplot`).
+    key : `str`
+        Key used to store the ranking results in `adata.uns`.
+    {show_save_ax}
+    **kwds : keyword arguments
+        Are passed to `scanpy.api.pl.matrixplot`.
+    """
+
+    _rank_genes_groups_plot(adata, plot_type='matrixplot', groups=groups, n_genes=n_genes,
+                            groupby=groupby, key=key, show=show, save=save, **kwds)
+
+
+@doc_params(show_save_ax=doc_show_save_ax)
+def rank_genes_groups_violin(
+        adata, groups=None, n_genes=20,
+        gene_names=None, gene_symbols=None,
+        use_raw=None,
+        key=None,
+        split=True,
+        scale='width',
+        strip=True, jitter=True, size=1,
+        ax=None, show=None, save=None):
+    """\
+    Plot ranking of genes for all tested comparisons.
+
+    Parameters
+    ----------
+    adata : :class:`~anndata.AnnData`
         Annotated data matrix.
     groups : list of `str`, optional (default: `None`)
         List of group names.
     n_genes : `int`, optional (default: 20)
-        Number of genes to show.
+        Number of genes to show. Is ignored if `gene_names` is passed.
+    gene_names : `None` or list of `str` (default: `None`)
+        List of genes to plot. Is only useful if interested in a custom gene list,
+        which is not the result of :func:`scanpy.api.tl.rank_genes_groups`.
+    gene_symbols : `str`, optional (default: `None`)
+        Key for field in `.var` that stores gene symbols if you do not want to
+        use `.var_names` displayed in the plot.
     use_raw : `bool`, optional (default: `None`)
         Use `raw` attribute of `adata` if present. Defaults to the value that
         was used in :func:`~scanpy.api.tl.rank_genes_groups`.
     split : `bool`, optional (default: `True`)
         Whether to split the violins or not.
-    scale : `str` (default: 'width')
+    scale : `str`, optional (default: 'width')
         See `seaborn.violinplot`.
-    strip : `bool` (default: `True`)
+    strip : `bool`, optional (default: `True`)
         Show a strip plot on top of the violin plot.
     jitter : `int`, `float`, `bool`, optional (default: `True`)
         If set to 0, no points are drawn. See `seaborn.stripplot`.
     size : `int`, optional (default: 1)
         Size of the jitter points.
-    computed_distribution : `bool`, optional (default: `False`)
-        Set to `True` if you want to use the scaled and shifted distribution
-        previously computed with the `compute_distribution` in
-        :func:`scanpy.api.tl.rank_genes_groups`
-    show : `bool`, optional (default: `None`)
-        Show the plot, do not return axis.
-    save : `bool` or `str`, optional (default: `None`)
-        If `True` or a `str`, save the figure. A string is appended to the
-        default filename. Infer the filetype if ending on \{'.pdf', '.png', '.svg'\}.
-    ax : `matplotlib.Axes`, optional (default: `None`)
-        A `matplotlib.Axes` object.
+    {show_save_ax}
     """
-    from ..tools import rank_genes_groups
-    groups_key = str(adata.uns['rank_genes_groups']['params']['groupby'])
+    if key is None:
+        key = 'rank_genes_groups'
+    groups_key = str(adata.uns[key]['params']['groupby'])
     if use_raw is None:
-        use_raw = bool(adata.uns['rank_genes_groups']['params']['use_raw'])
-    reference = str(adata.uns['rank_genes_groups']['params']['reference'])
-    groups_names = (adata.uns['rank_genes_groups']['names'].dtype.names
+        use_raw = bool(adata.uns[key]['params']['use_raw'])
+    reference = str(adata.uns[key]['params']['reference'])
+    groups_names = (adata.uns[key]['names'].dtype.names
                     if groups is None else groups)
     if isinstance(groups_names, str): groups_names = [groups_names]
+    axs = []
     for group_name in groups_names:
-        keys = []
-        gene_names = adata.uns[
-            'rank_genes_groups']['names'][group_name][:n_genes]
-        if computed_distribution:
-            for gene_counter, gene_name in enumerate(gene_names):
-                identifier = rank_genes_groups._build_identifier(
-                    groups_key, group_name, gene_counter, gene_name)
-                if compute_distribution and identifier not in set(adata.obs_keys()):
-                    raise ValueError(
-                        'You need to set `compute_distribution=True` in '
-                        '`sc.tl.rank_genes_groups()`.')
-                keys.append(identifier)
-        else:
-            keys = gene_names
-        # make a "hue" option!
+        if gene_names is None:
+            gene_names = adata.uns[
+                key]['names'][group_name][:n_genes]
         df = pd.DataFrame()
-        for key in keys:
+        new_gene_names = []
+        for g in gene_names:
             if adata.raw is not None and use_raw:
-                X_col = adata.raw[:, key].X
+                X_col = adata.raw[:, g].X
+                if gene_symbols:
+                    g = adata.raw.var[gene_symbols][g]
             else:
-                X_col = adata[:, key].X
+                X_col = adata[:, g].X
+                if gene_symbols:
+                    g = adata.var[gene_symbols][g]
             if issparse(X_col): X_col = X_col.toarray().flatten()
-            df[key] = X_col
+            new_gene_names.append(g)
+            df[g] = X_col
         df['hue'] = adata.obs[groups_key].astype(str).values
         if reference == 'rest':
-            df['hue'][df['hue'] != group_name] = 'rest'
+            df.loc[df['hue'] != group_name, 'hue'] = 'rest'
         else:
-            df['hue'][~df['hue'].isin([group_name, reference])] = np.nan
+            df.loc[~df['hue'].isin([group_name, reference]), 'hue'] = np.nan
         df['hue'] = df['hue'].astype('category')
-        df_tidy = pd.melt(df, id_vars='hue', value_vars=keys)
+        df_tidy = pd.melt(df, id_vars='hue', value_vars=new_gene_names)
         x = 'variable'
         y = 'value'
         hue_order = [group_name, reference]
         import seaborn as sns
-        ax = sns.violinplot(x=x, y=y, data=df_tidy, inner=None,
-                            hue_order=hue_order, hue='hue', split=split,
-                            scale=scale, orient='vertical', ax=ax)
+        _ax = sns.violinplot(x=x, y=y, data=df_tidy, inner=None,
+                             hue_order=hue_order, hue='hue', split=split,
+                             scale=scale, orient='vertical', ax=ax)
         if strip:
-            ax = sns.stripplot(x=x, y=y, data=df_tidy,
-                               hue='hue', dodge=True, hue_order=hue_order,
-                               jitter=jitter, color='black', size=size, ax=ax)
-        ax.set_xlabel('genes')
-        ax.set_title('{} vs. {}'.format(group_name, reference))
-        ax.legend_.remove()
-        if computed_distribution: ax.set_ylabel('z-score w.r.t. to bulk mean')
-        else: ax.set_ylabel('expression')
-        ax.set_xticklabels(gene_names, rotation='vertical')
+            _ax = sns.stripplot(x=x, y=y, data=df_tidy,
+                                hue='hue', dodge=True, hue_order=hue_order,
+                                jitter=jitter, color='black', size=size, ax=_ax)
+        _ax.set_xlabel('genes')
+        _ax.set_title('{} vs. {}'.format(group_name, reference))
+        _ax.legend_.remove()
+        _ax.set_ylabel('expression')
+        _ax.set_xticklabels(new_gene_names, rotation='vertical')
         writekey = ('rank_genes_groups_'
-                    + str(adata.uns['rank_genes_groups']['params']['groupby'])
+                    + str(adata.uns[key]['params']['groupby'])
                     + '_' + group_name)
         utils.savefig_or_show(writekey, show=show, save=save)
+        axs.append(_ax)
+    if show == False: return axs
 
 
 def sim(adata, tmax_realization=None, as_heatmap=False, shuffle=False,
@@ -1077,8 +588,8 @@ def sim(adata, tmax_realization=None, as_heatmap=False, shuffle=False,
         Shuffle the data.
     save : `bool` or `str`, optional (default: `None`)
         If `True` or a `str`, save the figure. A string is appended to the
-        default filename. Infer the filetype if ending on \{'.pdf', '.png', '.svg'\}.
-    show : bool, optional (default: None)
+        default filename. Infer the filetype if ending on {{'.pdf', '.png', '.svg'}}.
+    show : bool, optional (default: `None`)
         Show the plot, do not return axis.
     """
     from ... import utils as sc_utils

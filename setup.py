@@ -1,22 +1,17 @@
 from setuptools import setup, find_packages
-from pathlib import Path
+from io import open
 import versioneer
 
-package_name = 'scanpy'
-
-req_path = Path('requires.txt')
-if not req_path.is_file():
-    req_path = Path(package_name + '.egg-info') / req_path
-with req_path.open() as requirements:
+with open('requirements.txt', encoding='utf-8') as requirements:
     requires = [l.strip() for l in requirements]
 
 with open('README.rst', encoding='utf-8') as readme_f:
     readme = readme_f.read()
 
-author = 'Alex Wolf, Philipp Angerer, Davide Cittaro, Gokcen Eraslan, Tobias Callies'
+author = 'Alex Wolf, Philipp Angerer, Fidel Ramirez, Isaac Virshup, Sergei Rybakov, Davide Cittaro, Gokcen Eraslan, Tom White, Tobias Callies, Andrés R. Muñoz-Rojas.'
 
 setup(
-    name=package_name,
+    name='scanpy',
     version=versioneer.get_version(),
     cmdclass=versioneer.get_cmdclass(),
     description='Single-Cell Analysis in Python.',
@@ -25,7 +20,15 @@ setup(
     author=author,
     author_email='alex.wolf@helmholtz-muenchen.de',
     license='BSD',
+    python_requires='>=3.5',
     install_requires=requires,
+    extras_require=dict(
+        louvain=['python-igraph', 'louvain>=0.6'],
+        leiden=['python-igraph', 'leidenalg'],
+        bbknn=['bbknn'],
+        doc=['sphinx', 'sphinx_rtd_theme', 'sphinx_autodoc_typehints'],
+        test=['pytest'],
+    ),
     packages=find_packages(),
     # `package_data` does NOT work for source distributions!!!
     # you also need MANIFTEST.in

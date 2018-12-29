@@ -4,6 +4,7 @@
 import numpy as np
 import pandas as pd
 import scipy.sparse
+from scipy.sparse import issparse
 from .. import settings
 from .. import logging as logg
 
@@ -16,7 +17,8 @@ def score_genes(
         n_bins=25,
         score_name='score',
         random_state=0,
-        copy=False):  # we use the scikit-learn convention of calling the seed "random_state"
+        copy=False,
+        use_raw=False):  # we use the scikit-learn convention of calling the seed "random_state"
     """Score a set of genes [Satija15]_.
 
     The score is the average expression of a set of genes subtracted with the
@@ -28,7 +30,7 @@ def score_genes(
 
     Parameters
     ----------
-    adata : :class:`~scanpy.api.AnnData`
+    adata : :class:`~anndata.AnnData`
         The annotated data matrix.
     gene_list : iterable
         The list of gene names used for score calculation.
@@ -45,7 +47,8 @@ def score_genes(
         The random seed for sampling.
     copy : `bool`, optional (default: `False`)
         Copy `adata` or modify it inplace.
-
+    use_raw : `bool`, optional (default: `False`)
+        Use `raw` attribute of `adata` if present.
     Returns
     -------
     Depending on `copy`, returns or updates `adata` with an additional field
@@ -53,7 +56,7 @@ def score_genes(
 
     Examples
     --------
-    See this `notebook <https://github.com/theislab/scanpy_usage/tree/master/180209_cell_cycle>`_.
+    See this `notebook <https://github.com/theislab/scanpy_usage/tree/master/180209_cell_cycle>`__.
     """
     logg.info('computing score \'{}\''.format(score_name), r=True)
     adata = adata.copy() if copy else adata
@@ -61,25 +64,35 @@ def score_genes(
     if random_state:
         np.random.seed(random_state)
 
-    gene_list = set([x for x in gene_list if x in adata.var_names])
+    gene_list_in_var = []
+    var_names = adata.raw.var_names if use_raw else adata.var_names
+    for gene in gene_list:
+        if gene in var_names:
+            gene_list_in_var.append(gene)
+        else:
+            logg.warn('gene: {} is not in adata.var_names and will be ignored'.format(gene))
+    gene_list = set(gene_list_in_var[:])
 
     if not gene_pool:
-        gene_pool = list(adata.var_names)
+        gene_pool = list(var_names)
     else:
-        gene_pool = [x for x in gene_pool if x in adata.var_names]
+        gene_pool = [x for x in gene_pool if x in var_names]
 
     # Trying here to match the Seurat approach in scoring cells.
     # Basically we need to compare genes against random genes in a matched
     # interval of expression.
 
+    _adata = adata.raw if use_raw else adata
     # TODO: this densifies the whole data matrix for `gene_pool`
-    if scipy.sparse.issparse(adata.X):
+    if issparse(_adata.X):
         obs_avg = pd.Series(
             np.nanmean(
-                adata[:, gene_pool].X.toarray(), axis=0), index=gene_pool)  # average expression of genes
+                _adata[:, gene_pool].X.toarray(), axis=0), index=gene_pool)  # average expression of genes
     else:
         obs_avg = pd.Series(
-            np.nanmean(adata[:, gene_pool].X, axis=0), index=gene_pool)  # average expression of genes
+            np.nanmean(_adata[:, gene_pool].X, axis=0), index=gene_pool)  # average expression of genes
+
+    obs_avg = obs_avg[np.isfinite(obs_avg)] # Sometimes (and I don't know how) missing data may be there, with nansfor
 
     n_items = int(np.round(len(obs_avg) / (n_bins - 1)))
     obs_cut = obs_avg.rank(method='min') // n_items
@@ -95,7 +108,24 @@ def score_genes(
     control_genes = list(control_genes - gene_list)
     gene_list = list(gene_list)
 
-    score = np.mean(adata[:, gene_list].X, axis=1) - np.mean(adata[:, control_genes].X, axis=1)
+
+    X_list = _adata[:, gene_list].X
+    if issparse(X_list): X_list = X_list.toarray()
+    X_control = _adata[:, control_genes].X
+    if issparse(X_control): X_control = X_control.toarray()
+    X_control = np.nanmean(X_control, axis=1)
+
+    if len(gene_list) == 0:
+        # We shouldn't even get here, but just in case
+        logg.hint(
+            'could not add \n'
+            '    \'{}\', score of gene set (adata.obs)'.format(score_name))
+        return adata if copy else None
+    elif len(gene_list) == 1:
+        score = _adata[:, gene_list].X - X_control
+    else:
+        score = np.nanmean(X_list, axis=1) - X_control
+
     adata.obs[score_name] = pd.Series(np.array(score).ravel(), index=adata.obs_names)
 
     logg.info('    finished', time=True, end=' ' if settings.verbosity > 2 else '\n')
@@ -118,7 +148,7 @@ def score_genes_cell_cycle(
 
     Parameters
     ----------
-    adata : :class:`~scanpy.api.AnnData`
+    adata : :class:`~anndata.AnnData`
         The annotated data matrix.
     s_genes : `list`
         List of genes associated with S phase.
@@ -147,7 +177,7 @@ def score_genes_cell_cycle(
 
     Examples
     --------
-    See this `notebook <https://github.com/theislab/scanpy_usage/tree/master/180209_cell_cycle>`_.
+    See this `notebook <https://github.com/theislab/scanpy_usage/tree/master/180209_cell_cycle>`__.
     """
     logg.info('calculating cell cycle phase')
 

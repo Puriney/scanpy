@@ -6,9 +6,13 @@ from matplotlib import rcParams, ticker
 from matplotlib.colors import is_color_like
 from matplotlib.figure import SubplotParams as sppars
 from cycler import Cycler, cycler
+import warnings
 from .. import logging as logg
 from .. import settings
 from . import palettes
+
+
+_tmp_cluster_pos = None  # just a hacky solution for storing a tmp global variable
 
 
 # -------------------------------------------------------------------------------
@@ -87,7 +91,8 @@ def timeseries_subplot(X,
             s=rcParams['lines.markersize'],
             c=colors[i],
             label=var_names[i] if len(var_names) > 0 else '',
-            cmap=color_map)
+            cmap=color_map,
+            rasterized=settings._vector_friendly)
     ylim = pl.ylim()
     for ih, h in enumerate(highlightsX):
         pl.plot([h, h], [ylim[0], ylim[1]], '--', color='black')
@@ -160,27 +165,40 @@ def timeseries_as_heatmap(X, var_names=None, highlightsX=None, color_map=None):
 
 
 additional_colors = {
-    'gold2': '#eec900', 'firebrick3': '#cd2626', 'khaki2': '#eee685',
-    'slategray3': '#9fb6cd', 'palegreen3': '#7ccd7c', 'tomato2': '#ee5c42',
-    'grey80': '#cccccc', 'grey90': '#e5e5e5', 'wheat4': '#8b7e66', 'grey65':
-    '#a6a6a6', 'grey10': '#1a1a1a', 'grey20': '#333333', 'grey50': '#7f7f7f',
-    'grey30': '#4d4d4d', 'grey40': '#666666', 'antiquewhite2': '#eedfcc',
-    'grey77': '#c4c4c4', 'snow4': '#8b8989', 'chartreuse3': '#66cd00',
-    'yellow4': '#8b8b00', 'darkolivegreen2': '#bcee68', 'olivedrab3': '#9acd32',
-    'azure3': '#c1cdcd', 'violetred': '#d02090', 'mediumpurple3': '#8968cd',
-    'purple4': '#551a8b', 'seagreen4': '#2e8b57', 'lightblue3': '#9ac0cd',
-    'orchid3': '#b452cd', 'indianred 3': '#cd5555', 'grey60': '#999999',
-    'mediumorchid1': '#e066ff', 'plum3': '#cd96cd', 'palevioletred3': '#cd6889',
-    'gold2': '#eec900', 'firebrick3': '#cd2626', 'khaki2': '#eee685',
-    'slategray3': '#9fb6cd', 'palegreen3': '#7ccd7c', 'tomato2': '#ee5c42',
-    'grey80': '#cccccc', 'grey90': '#e5e5e5', 'wheat4': '#8b7e66', 'grey65':
-    '#a6a6a6', 'grey10': '#1a1a1a', 'grey20': '#333333', 'grey50': '#7f7f7f',
-    'grey30': '#4d4d4d', 'grey40': '#666666', 'antiquewhite2': '#eedfcc',
-    'grey77': '#c4c4c4', 'snow4': '#8b8989', 'chartreuse3': '#66cd00',
-    'yellow4': '#8b8b00', 'darkolivegreen2': '#bcee68', 'olivedrab3': '#9acd32',
-    'azure3': '#c1cdcd', 'violetred': '#d02090', 'mediumpurple3': '#8968cd',
-    'purple4': '#551a8b', 'seagreen4': '#2e8b57'}
-
+     'gold2': '#eec900',
+     'firebrick3': '#cd2626',
+     'khaki2': '#eee685',
+     'slategray3': '#9fb6cd',
+     'palegreen3': '#7ccd7c',
+     'tomato2': '#ee5c42',
+     'grey80': '#cccccc',
+     'grey90': '#e5e5e5',
+     'wheat4': '#8b7e66',
+     'grey65': '#a6a6a6',
+     'grey10': '#1a1a1a',
+     'grey20': '#333333',
+     'grey50': '#7f7f7f',
+     'grey30': '#4d4d4d',
+     'grey40': '#666666',
+     'antiquewhite2': '#eedfcc',
+     'grey77': '#c4c4c4',
+     'snow4': '#8b8989',
+     'chartreuse3': '#66cd00',
+     'yellow4': '#8b8b00',
+     'darkolivegreen2': '#bcee68',
+     'olivedrab3': '#9acd32',
+     'azure3': '#c1cdcd',
+     'violetred': '#d02090',
+     'mediumpurple3': '#8968cd',
+     'purple4': '#551a8b',
+     'seagreen4': '#2e8b57',
+     'lightblue3': '#9ac0cd',
+     'orchid3': '#b452cd',
+     'indianred 3': '#cd5555',
+     'grey60': '#999999',
+     'mediumorchid1': '#e066ff',
+     'plum3': '#cd96cd',
+     'palevioletred3': '#cd6889'}
 
 # -------------------------------------------------------------------------------
 # Helper functions
@@ -190,24 +208,22 @@ additional_colors = {
 def savefig(writekey, dpi=None, ext=None):
     """Save current figure to file.
 
-    The filename is generated as follows:
-    ```
-    if settings.run_name != '': writekey = settings.run_name + '_' + writekey
-    filename = settings.figdir + writekey + settings.plot_suffix + '.' + settings.file_format_figs
-    ```
+    The `filename` is generated as follows:
+
+        filename = settings.figdir + writekey + settings.plot_suffix + '.' + settings.file_format_figs
     """
     if dpi is None:
-        if not isinstance(rcParams['savefig.dpi'], str) and rcParams['savefig.dpi'] < 300:
-            dpi = 300
+        # we need this as in notebooks, the internal figures are also influenced by 'savefig.dpi' this...
+        if not isinstance(rcParams['savefig.dpi'], str) and rcParams['savefig.dpi'] < 150:
             if settings._low_resolution_warning:
-                logg.msg(
-                    '... you are using a very low resolution for saving figures, '
-                    'adjusting to dpi=300', v=4)
+                logg.warn(
+                    'You are using a low resolution (dpi<150) for saving figures.\n'
+                    'Consider running `set_figure_params(dpi_save=...)`, which will '
+                    'adjust `matplotlib.rcParams[\'savefig.dpi\']`')
                 settings._low_resolution_warning = False
         else:
             dpi = rcParams['savefig.dpi']
     if not os.path.exists(settings.figdir): os.makedirs(settings.figdir)
-    if settings.run_name != '': writekey = settings.run_name + '_' + writekey
     if settings.figdir[-1] != '/': settings.figdir += '/'
     if ext is None: ext = settings.file_format_figs
     filename = settings.figdir + writekey + settings.plot_suffix + '.' + ext
@@ -229,7 +245,7 @@ def savefig_or_show(writekey, show=None, dpi=None, ext=None, save=None):
         writekey += save
         save = True
     save = settings.autosave if save is None else save
-    show = (settings.autoshow and not settings.autosave) if show is None else show
+    show = settings.autoshow if show is None else show
     if save: savefig(writekey, dpi=dpi, ext=ext)
     if show: pl.show()
     if save: pl.close()  # clear figure
@@ -249,9 +265,11 @@ def adjust_palette(palette, length):
        or (not isinstance(palette, list) and len(palette.by_key()['color']) < length)):
         if length <= 28:
             palette = palettes.default_26
-        else:
+        elif length <= len(palettes.default_64):  # 103 colors
             palette = palettes.default_64
-        logg.m('... updating the color palette to provide enough colors')
+        else:
+            palette = ['grey' for i in range(length)]
+            logg.info('more than 103 colors would be required, initializing as \'grey\'')
         return palette if islist else cycler(color=palette)
     elif islist:
         return palette
@@ -261,11 +279,11 @@ def adjust_palette(palette, length):
         return palette
 
 
-def add_colors_for_categorical_sample_annotation(adata, key, palette=None):
-    if key + '_colors' in adata.uns:
+def add_colors_for_categorical_sample_annotation(adata, key, palette=None, force_update_colors=False):
+    if key + '_colors' in adata.uns and not force_update_colors:
         if len(adata.obs[key].cat.categories) > len(adata.uns[key + '_colors']):
-            logg.info('    number of defined colors smaller than number of categories,'
-                      ' using palette')
+            logg.info('    number of colors in `.uns[{}\'_colors\']` smaller than number of categories,'
+                      ' falling back to palette'.format(key))
         else:
             # make sure that these are valid colors
             adata.uns[key + '_colors'] = [
@@ -280,14 +298,43 @@ def add_colors_for_categorical_sample_annotation(adata, key, palette=None):
     adata.uns[key + '_colors'] = palette_adjusted[
         :len(adata.obs[key].cat.categories)].by_key()['color']
     if len(adata.obs[key].cat.categories) > len(adata.uns[key + '_colors']):
-        raise ValueError('Cannot plot more than {} categories, which is not enough for {}.'
-                         .format(len(adata.uns[key + '_colors']), key))
+        raise ValueError(
+            'Cannot plot more than {} categories, which is not enough for {}.'
+            .format(len(adata.uns[key + '_colors']), key))
     for iname, name in enumerate(adata.obs[key].cat.categories):
         if name in settings.categories_to_ignore:
-            logg.info('... setting color of group \'{}\' in \'{}\' to \'grey\' '
-                      '(`sc.settings.categories_to_ignore`)'
-                      .format(name, key))
+            logg.info(
+                '    setting color of group \'{}\' in \'{}\' to \'grey\' '
+                '(`sc.settings.categories_to_ignore`)'
+                .format(name, key))
             adata.uns[key + '_colors'][iname] = 'grey'
+
+
+def plot_edges(axs, adata, basis, edges_width, edges_color):
+    if not isinstance(axs, list): axs = [axs]
+    if 'neighbors' not in adata.uns:
+        raise ValueError('`edges=True` requires `pp.neighbors` to be run before.')
+    g = nx.Graph(adata.uns['neighbors']['connectivities'])
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        for ax in axs:
+            edge_collection = nx.draw_networkx_edges(
+                g, adata.obsm['X_' + basis],
+                ax=ax, width=edges_width, edge_color=edges_color)
+            edge_collection.set_zorder(-2)
+            edge_collection.set_rasterized(settings._vector_friendly)
+
+
+def plot_arrows(axs, adata, basis, arrows_kwds=None):
+    if not isinstance(axs, list): axs = [axs]
+    if 'Delta_' + basis not in adata.obsm.keys():
+        raise ValueError('`arrows=True` requires \'Delta_\' + basis from velocyto.')
+    X = adata.obsm['X_' + basis]
+    V = adata.obsm['Delta_' + basis]
+    for ax in axs:
+        quiver_kwds = arrows_kwds if arrows_kwds is not None else {}
+        ax.quiver(X[:, 0], X[:, 1], V[:, 0], V[:, 1], **quiver_kwds,
+                  rasterized=settings._vector_friendly)
 
 
 def scatter_group(ax, key, imask, adata, Y, projection='2d', size=3, alpha=None):
@@ -308,7 +355,8 @@ def scatter_group(ax, key, imask, adata, Y, projection='2d', size=3, alpha=None)
                c=color,
                edgecolors='none',
                s=size,
-               label=adata.obs[key].cat.categories[imask])
+               label=adata.obs[key].cat.categories[imask],
+               rasterized=settings._vector_friendly)
     return mask
 
 
@@ -449,7 +497,8 @@ def scatter_base(Y,
                              alpha=alpha,
                              edgecolors='none',  # 'face',
                              s=sizes[icolor],
-                             cmap=color_map)
+                             cmap=color_map,
+                             rasterized=settings._vector_friendly)
         if colorbars[icolor]:
             width = 0.006 * draw_region_width / len(colors)
             left = panel_pos[2][2*icolor+1] + (1.2 if projection == '3d' else 0.2) * width
@@ -514,7 +563,7 @@ def scatter_single(ax, Y, *args, **kwargs):
         kwargs['s'] = 2 if Y.shape[0] > 500 else 10
     if 'edgecolors' not in kwargs:
         kwargs['edgecolors'] = 'face'
-    ax.scatter(Y[:, 0], Y[:, 1], **kwargs)
+    ax.scatter(Y[:, 0], Y[:, 1], **kwargs, rasterized=settings._vector_friendly)
     ax.set_xticks([])
     ax.set_yticks([])
 
